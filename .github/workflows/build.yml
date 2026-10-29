@@ -1,4 +1,4 @@
-name: Build TNKTranslator APK
+name: Build HiaTranslator APK
 
 on:
   workflow_dispatch:
