@@ -33,8 +33,10 @@ jobs:
           sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
           sed -i 's/<application/<application android:usesCleartextTraffic="true"/g' android/app/src/main/AndroidManifest.xml
 
-      - name: Install Dependencies
-        run: flutter pub get
+      - name: Install Dependencies & Fix InAppWebView Proguard Bug
+        run: |
+          flutter pub get
+          find ~/.pub-cache -name "build.gradle*" -exec sed -i "s/proguard-android.txt/proguard-android-optimize.txt/g" {} +
 
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons
