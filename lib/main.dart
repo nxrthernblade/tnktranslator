@@ -81,7 +81,7 @@ class _ChromeBrowserScreenState extends State {
     final savedBookmarks = prefs.getString('tnk_bookmarks');
     final savedHistory = prefs.getString('tnk_history');
 
-    List defaultShortcuts = [
+    final List defaultShortcuts = [
       {'title': 'Google', 'url': 'https://www.google.com'},
       {'title': 'MangaDex', 'url': 'https://mangadex.org'},
       {'title': 'Webtoons', 'url': 'https://www.webtoons.com'},
@@ -194,7 +194,7 @@ class _ChromeBrowserScreenState extends State {
     _saveData();
   }
 
-  void _toggleDesktopMode() async {
+  Future _toggleDesktopMode() async {
     setState(() {
       _isDesktopMode = !_isDesktopMode;
     });
@@ -221,6 +221,89 @@ class _ChromeBrowserScreenState extends State {
         _canGoForward = forward;
       });
     }
+  }
+
+  void _openChromeMoreMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1F22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(
+                _isBookmarked() ? Icons.bookmark : Icons.bookmark_border,
+                color: _isBookmarked() ? const Color(0xFF8AB4F8) : Colors.white,
+              ),
+              title: const Text('เพิ่ม / ลบบุ๊กมาร์กหน้านี้'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _toggleBookmark();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.history, color: Colors.white),
+              title: const Text('บุ๊กมาร์ก & ประวัติการเข้าเว็บ'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openBookmarksAndHistorySheet();
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                _isDesktopMode
+                    ? Icons.check_box
+                    : Icons.check_box_outline_blank,
+                color: _isDesktopMode ? const Color(0xFF8AB4F8) : Colors.white,
+              ),
+              title: const Text('ขอหน้าเว็บแบบเดสก์ท็อป (PC Mode)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _toggleDesktopMode();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.cleaning_services_outlined,
+                  color: Colors.white),
+              title: const Text('ล้างแคชของเบราว์เซอร์'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await InAppWebViewController.clearAllCache();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('ล้างแคชเว็บเรียบร้อย')),
+                  );
+                }
+              },
+            ),
+            const Divider(color: Colors.white12),
+            ListTile(
+              leading: const Icon(Icons.key, color: Color(0xFFC58AF9)),
+              title: const Text('ตั้งค่า Gemini API Key & โมเดลแปล'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openSettingsDialog();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showAddShortcutDialog() {
@@ -582,7 +665,8 @@ class _ChromeBrowserScreenState extends State {
       if (mounted && !_cancelRequested) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('แปลทับในหน้าเว็บเสร็จแล้ว $count หน้า! เลื่อนอ่านต่อได้เลย'),
+            content:
+                Text('แปลทับในหน้าเว็บเสร็จแล้ว $count หน้า! เลื่อนอ่านต่อได้เลย'),
             backgroundColor: Colors.green.shade700,
           ),
         );
@@ -659,8 +743,16 @@ class _ChromeBrowserScreenState extends State {
         candidates[0]['content']['parts'][0]['text'].toString().trim();
     rawJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
 
-    final List parsed = jsonDecode(rawJson) as List;
-    return parsed;
+    final dynamic parsed = jsonDecode(rawJson);
+    if (parsed is List) {
+      return parsed;
+    }
+    if (parsed is Map) {
+      for (final dynamic v in parsed.values) {
+        if (v is List) return v;
+      }
+    }
+    return [];
   }
 
   Future _injectTranslatedCanvasIntoWeb(
@@ -879,94 +971,10 @@ class _ChromeBrowserScreenState extends State {
                     }
                   },
                 ),
-              PopupMenuButton(
+              IconButton(
                 icon: const Icon(Icons.more_vert),
-                color: const Color(0xFF28292E),
-                onSelected: (val) async {
-                  if (val == 'bookmark') {
-                    _toggleBookmark();
-                  } else if (val == 'history') {
-                    _openBookmarksAndHistorySheet();
-                  } else if (val == 'desktop') {
-                    _toggleDesktopMode();
-                  } else if (val == 'clear_cache') {
-                    await InAppWebViewController.clearAllCache();
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('ล้างแคชเว็บเรียบร้อย')),
-                      );
-                    }
-                  } else if (val == 'settings') {
-                    _openSettingsDialog();
-                  }
-                },
-                itemBuilder: (ctx) => [
-                  PopupMenuItem(
-                    value: 'bookmark',
-                    child: Row(
-                      children: [
-                        Icon(
-                          _isBookmarked()
-                              ? Icons.bookmark
-                              : Icons.bookmark_border,
-                          color: _isBookmarked()
-                              ? const Color(0xFF8AB4F8)
-                              : Colors.white,
-                        ),
-                        const SizedBox(width: 12),
-                        const Text('เพิ่ม/ลบบุ๊กมาร์กหน้านี้'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'history',
-                    child: Row(
-                      children: [
-                        Icon(Icons.history),
-                        SizedBox(width: 12),
-                        Text('บุ๊กมาร์ก & ประวัติเข้าเว็บ'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'desktop',
-                    child: Row(
-                      children: [
-                        Icon(
-                          _isDesktopMode
-                              ? Icons.check_box
-                              : Icons.check_box_outline_blank,
-                          color: _isDesktopMode
-                              ? const Color(0xFF8AB4F8)
-                              : Colors.white,
-                        ),
-                        const SizedBox(width: 12),
-                        const Text('ขอหน้าเว็บแบบเดสก์ท็อป (PC)'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'clear_cache',
-                    child: Row(
-                      children: [
-                        Icon(Icons.cleaning_services_outlined),
-                        SizedBox(width: 12),
-                        Text('ล้างแคชของเบราว์เซอร์'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem(
-                    value: 'settings',
-                    child: Row(
-                      children: [
-                        Icon(Icons.key, color: Color(0xFFC58AF9)),
-                        SizedBox(width: 12),
-                        Text('ตั้งค่า Gemini API Key'),
-                      ],
-                    ),
-                  ),
-                ],
+                tooltip: 'เมนูเพิ่มเติม',
+                onPressed: _openChromeMoreMenu,
               ),
             ],
           ),
