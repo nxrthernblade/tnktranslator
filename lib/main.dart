@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
@@ -20,38 +19,40 @@ class TnkBrowserApp extends StatelessWidget {
       title: 'TNK Browser',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true).copyWith(
-        scaffoldBackgroundColor: const Color(0xFF131314),
+        scaffoldBackgroundColor: const Color(0xFF1F1F1F),
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF8AB4F8),
-          secondary: Color(0xFFC58AF9),
-          surface: Color(0xFF1E1F22),
+          primary: Color(0xFFA8C7FA),
+          secondary: Color(0xFFD0BCFF),
+          surface: Color(0xFF28292A),
         ),
       ),
-      home: const ChromeBrowserScreen(),
+      home: const ModernBrowserScreen(),
     );
   }
 }
 
-class ChromeBrowserScreen extends StatefulWidget {
-  const ChromeBrowserScreen({super.key});
+class ModernBrowserScreen extends StatefulWidget {
+  const ModernBrowserScreen({super.key});
 
   @override
-  State createState() => _ChromeBrowserScreenState();
+  State createState() => _ModernBrowserScreenState();
 }
 
-class _ChromeBrowserScreenState extends State {
+class _ModernBrowserScreenState extends State {
   InAppWebViewController? _webController;
   final TextEditingController _omniboxController = TextEditingController();
   final TextEditingController _homeSearchController = TextEditingController();
+  final FocusNode _omniboxFocus = FocusNode();
+
+  final ValueNotifier _progressNotifier = ValueNotifier(0.0);
 
   bool _isHome = true;
-  bool _isLoading = false;
-  double _progress = 0.0;
   String _currentUrl = '';
-  String _currentTitle = 'หน้าหลัก';
+  String _currentTitle = 'New tab';
   bool _canGoBack = false;
   bool _canGoForward = false;
   bool _isDesktopMode = false;
+  bool _showQuickTranslatePill = true;
 
   String _apiKey = '';
   String _selectedModel = 'gemini-2.5-flash';
@@ -73,6 +74,54 @@ class _ChromeBrowserScreenState extends State {
   void initState() {
     super.initState();
     _loadAllData();
+    _omniboxFocus.addListener(() {
+      if (_omniboxFocus.hasFocus) {
+        _omniboxController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _omniboxController.text.length,
+        );
+      }
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _omniboxController.dispose();
+    _homeSearchController.dispose();
+    _omniboxFocus.dispose();
+    _progressNotifier.dispose();
+    super.dispose();
+  }
+
+  List _extractListSafely(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) return raw;
+    if (raw is Map) {
+      for (final dynamic val in raw.values) {
+        if (val is List) return val;
+      }
+      return [];
+    }
+    if (raw is String) {
+      String cleaned =
+          raw.replaceAll('```json', '').replaceAll('```', '').trim();
+      if (cleaned.isEmpty) return [];
+      try {
+        final dynamic decoded = jsonDecode(cleaned);
+        return _extractListSafely(decoded);
+      } catch (_) {
+        final int start = cleaned.indexOf('[');
+        final int end = cleaned.lastIndexOf(']');
+        if (start != -1 && end != -1 && end != start) {
+          try {
+            final dynamic sub = jsonDecode(cleaned.substring(start, end + 1));
+            if (sub is List) return sub;
+          } catch (_) {}
+        }
+      }
+    }
+    return [];
   }
 
   Future _loadAllData() async {
@@ -85,21 +134,21 @@ class _ChromeBrowserScreenState extends State {
       {'title': 'Google', 'url': 'https://www.google.com'},
       {'title': 'MangaDex', 'url': 'https://mangadex.org'},
       {'title': 'Webtoons', 'url': 'https://www.webtoons.com'},
-      {'title': 'Naver Webtoon', 'url': 'https://m.comic.naver.com'},
-      {'title': 'KakaoPage', 'url': 'https://page.kakao.com'},
-      {'title': 'Reddit', 'url': 'https://www.reddit.com'},
+      {'title': 'ManhuaUS', 'url': 'https://manhuaus.com'},
+      {'title': 'Asura', 'url': 'https://asuracomic.net'},
+      {'title': 'Naver', 'url': 'https://m.comic.naver.com'},
     ];
 
     setState(() {
       _apiKey = prefs.getString('gemini_api_key') ?? '';
       _selectedModel = prefs.getString('gemini_model') ?? 'gemini-2.5-flash';
+      _showQuickTranslatePill = prefs.getBool('tnk_quick_pill') ?? true;
       _shortcuts = savedShortcuts != null
-          ? (jsonDecode(savedShortcuts) as List)
+          ? _extractListSafely(savedShortcuts)
           : defaultShortcuts;
       _bookmarks =
-          savedBookmarks != null ? (jsonDecode(savedBookmarks) as List) : [];
-      _history =
-          savedHistory != null ? (jsonDecode(savedHistory) as List) : [];
+          savedBookmarks != null ? _extractListSafely(savedBookmarks) : [];
+      _history = savedHistory != null ? _extractListSafely(savedHistory) : [];
     });
   }
 
@@ -108,6 +157,7 @@ class _ChromeBrowserScreenState extends State {
     await prefs.setString('tnk_shortcuts', jsonEncode(_shortcuts));
     await prefs.setString('tnk_bookmarks', jsonEncode(_bookmarks));
     await prefs.setString('tnk_history', jsonEncode(_history));
+    await prefs.setBool('tnk_quick_pill', _showQuickTranslatePill);
   }
 
   Future _saveApiSettings(String key, String model) async {
@@ -118,6 +168,14 @@ class _ChromeBrowserScreenState extends State {
       _apiKey = key.trim();
       _selectedModel = model.trim();
     });
+  }
+
+  String _formatCleanUrl(String url) {
+    if (url.isEmpty) return '';
+    return url
+        .replaceFirst('https://', '')
+        .replaceFirst('http://', '')
+        .replaceFirst('www.', '');
   }
 
   void _navigateToInput(String rawInput) {
@@ -141,7 +199,7 @@ class _ChromeBrowserScreenState extends State {
     setState(() {
       _isHome = false;
       _currentUrl = targetUrl;
-      _omniboxController.text = targetUrl;
+      _omniboxController.text = _formatCleanUrl(targetUrl);
     });
 
     _webController?.loadUrl(urlRequest: URLRequest(url: WebUri(targetUrl)));
@@ -158,26 +216,29 @@ class _ChromeBrowserScreenState extends State {
 
   void _addHistoryItem(String title, String url) {
     if (url.isEmpty || url == 'about:blank') return;
-    _history.removeWhere((item) => (item as Map)['url'] == url);
+    _history.removeWhere((item) => (item is Map) && item['url'] == url);
     _history.insert(0, {
       'title': title.isEmpty ? url : title,
       'url': url,
     });
-    if (_history.length >= 40) {
-      _history = _history.take(40).toList();
+    if (_history.length >= 50) {
+      _history = _history.take(50).toList();
     }
     _saveData();
   }
 
   bool _isBookmarked() {
-    return _bookmarks.any((item) => (item as Map)['url'] == _currentUrl);
+    if (_isHome || _currentUrl.isEmpty) return false;
+    return _bookmarks
+        .any((item) => (item is Map) && item['url'] == _currentUrl);
   }
 
   void _toggleBookmark() {
     if (_isHome || _currentUrl.isEmpty) return;
     setState(() {
       if (_isBookmarked()) {
-        _bookmarks.removeWhere((item) => (item as Map)['url'] == _currentUrl);
+        _bookmarks.removeWhere(
+            (item) => (item is Map) && item['url'] == _currentUrl);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('ลบออกจากบุ๊กมาร์กแล้ว')),
         );
@@ -187,7 +248,7 @@ class _ChromeBrowserScreenState extends State {
           'url': _currentUrl,
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('บันทึกบุ๊กมาร์กเรียบร้อย')),
+          const SnackBar(content: Text('เพิ่มในบุ๊กมาร์กเรียบร้อย')),
         );
       }
     });
@@ -215,7 +276,7 @@ class _ChromeBrowserScreenState extends State {
     if (_webController == null) return;
     final back = await _webController!.canGoBack();
     final forward = await _webController!.canGoForward();
-    if (mounted) {
+    if (mounted && (back != _canGoBack || forward != _canGoForward)) {
       setState(() {
         _canGoBack = back;
         _canGoForward = forward;
@@ -223,83 +284,238 @@ class _ChromeBrowserScreenState extends State {
     }
   }
 
-  void _openChromeMoreMenu() {
-    showModalBottomSheet(
+  void _openBraveStyleMenu() {
+    showGeneralDialog(
       context: context,
-      backgroundColor: const Color(0xFF1E1F22),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      barrierDismissible: true,
+      barrierLabel: 'Menu',
+      barrierColor: Colors.black38,
+      transitionDuration: const Duration(milliseconds: 140),
+      pageBuilder: (ctx, anim1, anim2) {
+        return SafeArea(
+          child: Align(
+            alignment: Alignment.topRight,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8, right: 10),
+              child: Material(
+                color: const Color(0xFF2B2C2E),
+                elevation: 14,
+                borderRadius: BorderRadius.circular(22),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    width: 285,
+                    maxHeight: 560,
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _buildCircleTopAction(
+                                icon: Icons.arrow_back,
+                                enabled: !_isHome && _canGoBack,
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _webController?.goBack();
+                                },
+                              ),
+                              _buildCircleTopAction(
+                                icon: Icons.arrow_forward,
+                                enabled: !_isHome && _canGoForward,
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _webController?.goForward();
+                                },
+                              ),
+                              _buildCircleTopAction(
+                                icon: _isBookmarked()
+                                    ? Icons.star
+                                    : Icons.star_border,
+                                activeColor: _isBookmarked()
+                                    ? const Color(0xFFA8C7FA)
+                                    : null,
+                                enabled: !_isHome,
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _toggleBookmark();
+                                },
+                              ),
+                              _buildCircleTopAction(
+                                icon: Icons.home_outlined,
+                                enabled: true,
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _goHome();
+                                },
+                              ),
+                              _buildCircleTopAction(
+                                icon: Icons.refresh,
+                                enabled: !_isHome,
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _webController?.reload();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        const Divider(color: Colors.white12, height: 1),
+                        _buildMenuItem(
+                          icon: Icons.add_box_outlined,
+                          title: 'New tab (หน้าหลัก)',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _goHome();
+                          },
+                        ),
+                        _buildMenuItem(
+                          icon: Icons.g_translate,
+                          title: 'Translate... (แปลหน้านี้เป็นไทย)',
+                          highlight: true,
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _translateCurrentPageInPlace();
+                          },
+                        ),
+                        _buildMenuItem(
+                          icon: _showQuickTranslatePill
+                              ? Icons.visibility
+                              : Icons.visibility_off_outlined,
+                          title: _showQuickTranslatePill
+                              ? 'ซ่อนปุ่มแปลลอยมุมจอ'
+                              : 'แสดงปุ่มแปลลอยมุมจอ',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            setState(() {
+                              _showQuickTranslatePill =
+                                  !_showQuickTranslatePill;
+                            });
+                            _saveData();
+                          },
+                        ),
+                        const Divider(color: Colors.white12, height: 1),
+                        _buildMenuItem(
+                          icon: Icons.history,
+                          title: 'History (ประวัติการเข้าเว็บ)',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openBookmarksAndHistorySheet(initialIndex: 1);
+                          },
+                        ),
+                        _buildMenuItem(
+                          icon: Icons.star_outline,
+                          title: 'Bookmarks (บุ๊กมาร์กที่บันทึก)',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openBookmarksAndHistorySheet(initialIndex: 0);
+                          },
+                        ),
+                        _buildMenuItem(
+                          icon: Icons.delete_outline,
+                          title: 'Delete browsing data (ล้างแคช)',
+                          onTap: () async {
+                            Navigator.pop(ctx);
+                            await InAppWebViewController.clearAllCache();
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text('ล้างแคชเรียบร้อย')),
+                              );
+                            }
+                          },
+                        ),
+                        const Divider(color: Colors.white12, height: 1),
+                        _buildMenuItem(
+                          icon: _isDesktopMode
+                              ? Icons.check_box
+                              : Icons.desktop_windows_outlined,
+                          title: 'Desktop site (โหมดคอมพิวเตอร์)',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _toggleDesktopMode();
+                          },
+                        ),
+                        _buildMenuItem(
+                          icon: Icons.key_outlined,
+                          title: 'AI Translator Settings (ตั้งค่าคีย์)',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openSettingsDialog();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCircleTopAction({
+    required IconData icon,
+    required bool enabled,
+    required VoidCallback onTap,
+    Color? activeColor,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: const BoxDecoration(
+          color: Color(0xFF3A3B3E),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          size: 21,
+          color: enabled
+              ? (activeColor ?? Colors.white)
+              : Colors.white.withOpacity(0.28),
+        ),
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    );
+  }
+
+  Widget _buildMenuItem({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    bool highlight = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+        child: Row(
           children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(2),
+            Icon(
+              icon,
+              size: 22,
+              color: highlight ? const Color(0xFFA8C7FA) : Colors.white,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                title,
+                style: GoogleFonts.sarabun(
+                  fontSize: 15,
+                  fontWeight: highlight ? FontWeight.w700 : FontWeight.w500,
+                  color: highlight ? const Color(0xFFA8C7FA) : Colors.white,
+                ),
               ),
             ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: Icon(
-                _isBookmarked() ? Icons.bookmark : Icons.bookmark_border,
-                color: _isBookmarked() ? const Color(0xFF8AB4F8) : Colors.white,
-              ),
-              title: const Text('เพิ่ม / ลบบุ๊กมาร์กหน้านี้'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _toggleBookmark();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.history, color: Colors.white),
-              title: const Text('บุ๊กมาร์ก & ประวัติการเข้าเว็บ'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _openBookmarksAndHistorySheet();
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                _isDesktopMode
-                    ? Icons.check_box
-                    : Icons.check_box_outline_blank,
-                color: _isDesktopMode ? const Color(0xFF8AB4F8) : Colors.white,
-              ),
-              title: const Text('ขอหน้าเว็บแบบเดสก์ท็อป (PC Mode)'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _toggleDesktopMode();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.cleaning_services_outlined,
-                  color: Colors.white),
-              title: const Text('ล้างแคชของเบราว์เซอร์'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await InAppWebViewController.clearAllCache();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('ล้างแคชเว็บเรียบร้อย')),
-                  );
-                }
-              },
-            ),
-            const Divider(color: Colors.white12),
-            ListTile(
-              leading: const Icon(Icons.key, color: Color(0xFFC58AF9)),
-              title: const Text('ตั้งค่า Gemini API Key & โมเดลแปล'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _openSettingsDialog();
-              },
-            ),
-            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -313,7 +529,7 @@ class _ChromeBrowserScreenState extends State {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1F22),
+        backgroundColor: const Color(0xFF28292A),
         title: Text('เพิ่มทางลัดหน้าหลัก', style: GoogleFonts.sarabun()),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -321,7 +537,7 @@ class _ChromeBrowserScreenState extends State {
             TextField(
               controller: titleCtrl,
               decoration: const InputDecoration(
-                labelText: 'ชื่อเว็บ (เช่น MangaDex)',
+                labelText: 'ชื่อเว็บ (เช่น ManhuaUS)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -329,7 +545,7 @@ class _ChromeBrowserScreenState extends State {
             TextField(
               controller: urlCtrl,
               decoration: const InputDecoration(
-                labelText: 'ลิงก์ URL (เช่น mangadex.org)',
+                labelText: 'URL (เช่น manhuaus.com)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -367,7 +583,7 @@ class _ChromeBrowserScreenState extends State {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1F22),
+        backgroundColor: const Color(0xFF28292A),
         title: Text(
           'ตั้งค่า AI แปลมังงะ',
           style: GoogleFonts.sarabun(fontWeight: FontWeight.bold),
@@ -389,15 +605,15 @@ class _ChromeBrowserScreenState extends State {
             TextField(
               controller: modelCtrl,
               decoration: const InputDecoration(
-                labelText: 'รุ่นโมเดล (Model)',
+                labelText: 'ชื่อโมเดล (Model)',
                 hintText: 'gemini-2.5-flash',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 10),
             const Text(
-              'แนะนำใช้ gemini-2.5-flash หรือ gemini-2.0-flash เพื่อความเร็วและแม่นยำในการสแกนกรอบคำพูด',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              'แนะนำ gemini-2.5-flash หรือ gemini-2.0-flash แปลไวและแม่นยำ',
+              style: TextStyle(fontSize: 12, color: Colors.white60),
             ),
           ],
         ),
@@ -411,7 +627,7 @@ class _ChromeBrowserScreenState extends State {
               _saveApiSettings(keyCtrl.text, modelCtrl.text);
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('บันทึกการตั้งค่าเรียบร้อย')),
+                const SnackBar(content: Text('บันทึกตั้งค่าเรียบร้อย')),
               );
             },
             child: const Text('บันทึก'),
@@ -421,42 +637,43 @@ class _ChromeBrowserScreenState extends State {
     );
   }
 
-  void _openBookmarksAndHistorySheet() {
+  void _openBookmarksAndHistorySheet({int initialIndex = 0}) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1F22),
+      backgroundColor: const Color(0xFF28292A),
       isScrollControlled: true,
       builder: (ctx) => DefaultTabController(
+        initialIndex: initialIndex,
         length: 2,
         child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.7,
+          height: MediaQuery.of(context).size.height * 0.72,
           child: Column(
             children: [
               const TabBar(
                 tabs: [
-                  Tab(icon: Icon(Icons.bookmark), text: 'บุ๊กมาร์ก'),
-                  Tab(icon: Icon(Icons.history), text: 'ประวัติเข้าเว็บ'),
+                  Tab(icon: Icon(Icons.star_outline), text: 'Bookmarks'),
+                  Tab(icon: Icon(Icons.history), text: 'History'),
                 ],
               ),
               Expanded(
                 child: TabBarView(
                   children: [
                     _bookmarks.isEmpty
-                        ? const Center(child: Text('ยังไม่มีบุ๊กมาร์กที่บันทึกไว้'))
+                        ? const Center(child: Text('ยังไม่มีบุ๊กมาร์ก'))
                         : ListView.builder(
                             itemCount: _bookmarks.length,
                             itemBuilder: (c, i) {
-                              final item = _bookmarks[i] as Map;
+                              final Map item = Map.from(_bookmarks[i] as Map);
                               return ListTile(
-                                leading: const Icon(Icons.bookmark,
-                                    color: Color(0xFF8AB4F8)),
+                                leading: const Icon(Icons.star,
+                                    color: Color(0xFFA8C7FA)),
                                 title: Text(
-                                  item['title'].toString(),
+                                  item['title']?.toString() ?? '',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 subtitle: Text(
-                                  item['url'].toString(),
+                                  item['url']?.toString() ?? '',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -468,12 +685,14 @@ class _ChromeBrowserScreenState extends State {
                                     });
                                     _saveData();
                                     Navigator.pop(ctx);
-                                    _openBookmarksAndHistorySheet();
+                                    _openBookmarksAndHistorySheet(
+                                        initialIndex: 0);
                                   },
                                 ),
                                 onTap: () {
                                   Navigator.pop(ctx);
-                                  _navigateToInput(item['url'].toString());
+                                  _navigateToInput(
+                                      item['url']?.toString() ?? '');
                                 },
                               );
                             },
@@ -498,24 +717,25 @@ class _ChromeBrowserScreenState extends State {
                                 child: ListView.builder(
                                   itemCount: _history.length,
                                   itemBuilder: (c, i) {
-                                    final item = _history[i] as Map;
+                                    final Map item =
+                                        Map.from(_history[i] as Map);
                                     return ListTile(
                                       leading: const Icon(Icons.public,
-                                          color: Colors.grey),
+                                          color: Colors.white54),
                                       title: Text(
-                                        item['title'].toString(),
+                                        item['title']?.toString() ?? '',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       subtitle: Text(
-                                        item['url'].toString(),
+                                        item['url']?.toString() ?? '',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                       onTap: () {
                                         Navigator.pop(ctx);
                                         _navigateToInput(
-                                            item['url'].toString());
+                                            item['url']?.toString() ?? '');
                                       },
                                     );
                                   },
@@ -544,7 +764,7 @@ class _ChromeBrowserScreenState extends State {
     if (_apiKey.isEmpty) {
       _openSettingsDialog();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรอก Gemini API Key ก่อนเริ่มแปลนะครับ')),
+        const SnackBar(content: Text('ใส่ Gemini API Key ก่อนเริ่มแปลนะครับ')),
       );
       return;
     }
@@ -552,96 +772,122 @@ class _ChromeBrowserScreenState extends State {
     setState(() {
       _isTranslating = true;
       _cancelRequested = false;
-      _translateStatus = 'กำลังสแกนหารูปการ์ตูนในหน้าเว็บ...';
+      _translateStatus = 'กำลังดึงภาพหน้าการ์ตูน...';
     });
 
     try {
-      const String jsFindAndExtract = """
+      await _webController!.evaluateJavascript(source: """
+      window._tnkExtractState = 'WORKING';
+      window._tnkExtractPayload = '[]';
       (async function() {
-        const allImgs = Array.from(document.querySelectorAll('img'));
-        const targets = [];
-        let idx = 0;
+        try {
+          const allImgs = Array.from(document.querySelectorAll('img'));
+          const targets = [];
+          let idx = 0;
 
-        for (const img of allImgs) {
-          idx++;
-          const w = img.naturalWidth || img.width || img.clientWidth;
-          const h = img.naturalHeight || img.height || img.clientHeight;
-          if (!(w >= 260 && h >= 320)) continue;
-          if (img.dataset.tnkTranslated === '1') continue;
+          for (const img of allImgs) {
+            idx++;
+            const rect = img.getBoundingClientRect();
+            const w = img.naturalWidth || img.width || rect.width;
+            const h = img.naturalHeight || img.height || rect.height;
+            if (!(w >= 220 && h >= 260)) continue;
+            if (img.dataset.tnkTranslated === '1') continue;
 
-          const rect = img.getBoundingClientRect();
-          const dist = Math.abs(rect.top);
-          const id = img.dataset.tnkId || ('tnk_img_' + Date.now() + '_' + idx);
-          img.dataset.tnkId = id;
+            const dist = Math.abs(rect.top);
+            const id = img.dataset.tnkId || ('tnk_img_' + Date.now() + '_' + idx);
+            img.dataset.tnkId = id;
 
-          const src = img.currentSrc || img.src || img.dataset.src || img.getAttribute('data-lazy-src') || '';
-          if (!src) continue;
+            const src = img.currentSrc || img.src || img.dataset.src || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || '';
+            if (!src) continue;
 
-          targets.push({ img: img, id: id, src: src, dist: dist });
-        }
+            targets.push({ img: img, id: id, src: src, dist: dist });
+          }
 
-        targets.sort(function(a, b) { return a.dist - b.dist; });
-        const batch = targets.slice(0, 8);
-        const output = [];
+          targets.sort(function(a, b) { return a.dist - b.dist; });
+          const batch = targets.slice(0, 6);
+          const output = [];
 
-        for (const item of batch) {
-          const im = item.img;
-          let b64 = '';
-          try {
-            const c = document.createElement('canvas');
-            c.width = im.naturalWidth || im.width;
-            c.height = im.naturalHeight || im.height;
-            const ctx = c.getContext('2d');
-            ctx.drawImage(im, 0, 0);
-            b64 = c.toDataURL('image/jpeg', 0.86).split(',')[1];
-          } catch (e1) {
+          for (const item of batch) {
+            const im = item.img;
+            let b64 = '';
             try {
-              const r = await fetch(item.src, { credentials: 'include' });
-              const blob = await r.blob();
-              b64 = await new Promise(function(res) {
-                const reader = new FileReader();
-                reader.onloadend = function() {
-                  res(reader.result.split(',')[1]);
-                };
-                reader.readAsDataURL(blob);
-              });
-            } catch (e2) {
-              b64 = 'URL:' + item.src;
+              const c = document.createElement('canvas');
+              c.width = im.naturalWidth || im.width;
+              c.height = im.naturalHeight || im.height;
+              const ctx = c.getContext('2d');
+              ctx.drawImage(im, 0, 0);
+              b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
+            } catch (e1) {
+              try {
+                const r = await fetch(item.src, { credentials: 'include' });
+                const blob = await r.blob();
+                b64 = await new Promise(function(res) {
+                  const reader = new FileReader();
+                  reader.onloadend = function() {
+                    const resStr = reader.result || '';
+                    res(resStr.indexOf(',') !== -1 ? resStr.split(',')[1] : '');
+                  };
+                  reader.readAsDataURL(blob);
+                });
+              } catch (e2) {
+                b64 = 'URL:' + item.src;
+              }
+            }
+            if (b64) {
+              output.push({ id: item.id, data: b64 });
             }
           }
-          output.push({ id: item.id, data: b64 });
+          window._tnkExtractPayload = JSON.stringify(output);
+          window._tnkExtractState = 'DONE';
+        } catch (err) {
+          window._tnkExtractPayload = 'ERROR:' + String(err);
+          window._tnkExtractState = 'ERROR';
         }
-        return JSON.stringify(output);
       })();
-      """;
+      """);
 
-      final rawExtract =
-          await _webController!.evaluateJavascript(source: jsFindAndExtract);
-      if (rawExtract == null) {
-        throw Exception('ไม่สามารถดึงข้อมูลจากหน้าเว็บได้');
+      String stateStr = 'WORKING';
+      int attempts = 0;
+      while (stateStr == 'WORKING' && 50 != attempts && !_cancelRequested) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        final st = await _webController!
+            .evaluateJavascript(source: 'window._tnkExtractState');
+        stateStr = st?.toString() ?? 'WORKING';
+        attempts++;
       }
 
-      final List items = jsonDecode(rawExtract.toString()) as List;
+      final rawPayload = await _webController!
+          .evaluateJavascript(source: 'window._tnkExtractPayload');
+      final String payloadStr = rawPayload?.toString() ?? '[]';
+
+      if (payloadStr.startsWith('ERROR:')) {
+        throw Exception(payloadStr.substring(6));
+      }
+
+      final List items = _extractListSafely(payloadStr);
       if (items.isEmpty) {
         throw Exception(
-            'ไม่พบรูปหน้าการ์ตูนใหม่ให้แปล (ลองเลื่อนหน้าจอลงไปหน้าถัดไปดูนะเฮีย)');
+            'ไม่พบรูปหน้าการ์ตูนใหม่ให้แปล (เลื่อนหน้าจอให้รูปโหลดก่อนนะเฮีย)');
       }
 
       int count = 0;
       for (final dynamic rawItem in items) {
         if (_cancelRequested) break;
+        if (rawItem is! Map) continue;
         count++;
-        final Map itemMap = rawItem as Map;
-        final String imgId = itemMap['id'].toString();
-        String imgData = itemMap['data'].toString();
+
+        final Map itemMap = Map.from(rawItem);
+        final String imgId = itemMap['id']?.toString() ?? '';
+        String imgData = itemMap['data']?.toString() ?? '';
+        if (imgId.isEmpty || imgData.isEmpty) continue;
 
         setState(() {
           _translateStatus =
-              'กำลังคลีนและแปลหน้า $count / ${items.length} ทับลงในเว็บ...';
+              'กำลังคลีน & แปลหน้า $count / ${items.length}...';
         });
 
         if (imgData.startsWith('URL:')) {
-          final String url = imgData.substring(4);
+          final String url = imgData.substring(4).trim();
           final resp = await http.get(
             Uri.parse(url),
             headers: {
@@ -656,18 +902,20 @@ class _ChromeBrowserScreenState extends State {
           }
         }
 
-        final List blocks = (await _requestGeminiBoxes(imgData)) as List;
+        final List blocks = await _requestGeminiBoxes(imgData);
         if (_cancelRequested) break;
 
-        await _injectTranslatedCanvasIntoWeb(imgId, imgData, blocks);
+        if (blocks.isNotEmpty) {
+          await _injectTranslatedCanvasIntoWeb(imgId, imgData, blocks);
+        }
       }
 
       if (mounted && !_cancelRequested) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text('แปลทับในหน้าเว็บเสร็จแล้ว $count หน้า! เลื่อนอ่านต่อได้เลย'),
+            content: Text('แปลทับลงในเว็บเรียบร้อย $count หน้า!'),
             backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -696,7 +944,7 @@ class _ChromeBrowserScreenState extends State {
     );
 
     const String prompt = '''
-คุณคือนักแปลมังงะและมันฮวามืออาชีพ สแกนหาบอลลูนคำพูดและข้อความสำคัญในภาพนี้ แล้วแปลเป็นภาษาไทยที่ลื่นไหล เข้ากับอารมณ์ตัวละคร
+คุณคือนักแปลมังงะและมันฮวามืออาชีพ สแกนหาบอลลูนคำพูดและข้อความสำคัญในภาพนี้ แล้วแปลเป็นภาษาไทยที่ลื่นไหลเป็นธรรมชาติ เข้ากับบริบทตัวละคร
 ส่งกลับมาเป็น JSON Array เท่านั้น ตามโครงสร้างนี้:
 [
   {
@@ -704,7 +952,7 @@ class _ChromeBrowserScreenState extends State {
     "text": "คำแปลภาษาไทย"
   }
 ]
-โดยพิกัด box_2d เป็นสเกล 0 ถึง 1000 ที่คลุมเฉพาะตัวอักษรต้นฉบับในบอลลูน ห้ามใส่ข้อความอื่นนอกเหนือจาก JSON
+โดยพิกัด box_2d เป็นตัวเลข 0 ถึง 1000 ที่คลุมเฉพาะตัวอักษรต้นฉบับในบอลลูน ห้ามใส่ข้อความอื่นนอกจาก JSON Array
 ''';
 
     final response = await http.post(
@@ -732,27 +980,27 @@ class _ChromeBrowserScreenState extends State {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('API Error (${response.statusCode}): ${response.body}');
+      throw Exception('API Error (${response.statusCode})');
     }
 
-    final Map decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map;
-    final List? candidates = decoded['candidates'] as List?;
-    if (candidates == null || candidates.isEmpty) return [];
+    final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    if (decoded is! Map) return [];
 
-    String rawJson =
-        candidates[0]['content']['parts'][0]['text'].toString().trim();
-    rawJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
+    final List candidates = _extractListSafely(decoded['candidates']);
+    if (candidates.isEmpty) return [];
 
-    final dynamic parsed = jsonDecode(rawJson);
-    if (parsed is List) {
-      return parsed;
-    }
-    if (parsed is Map) {
-      for (final dynamic v in parsed.values) {
-        if (v is List) return v;
-      }
-    }
-    return [];
+    final dynamic firstCand = candidates[0];
+    if (firstCand is! Map) return [];
+    final dynamic content = firstCand['content'];
+    if (content is! Map) return [];
+    final List parts = _extractListSafely(content['parts']);
+    if (parts.isEmpty) return [];
+
+    final dynamic firstPart = parts[0];
+    if (firstPart is! Map) return [];
+    final String rawJson = firstPart['text']?.toString() ?? '[]';
+
+    return _extractListSafely(rawJson);
   }
 
   Future _injectTranslatedCanvasIntoWeb(
@@ -764,9 +1012,11 @@ class _ChromeBrowserScreenState extends State {
       const targetImg = document.querySelector('img[data-tnk-id="$imgId"]');
       if (!targetImg) return;
 
-      const blocks = JSON.parse(new TextDecoder().decode(
+      const rawJsonStr = new TextDecoder().decode(
         Uint8Array.from(atob('$blocksB64'), function(c) { return c.charCodeAt(0); })
-      ));
+      );
+      const parsedBlocks = JSON.parse(rawJsonStr);
+      const blocks = Array.isArray(parsedBlocks) ? parsedBlocks : [];
 
       const loader = new Image();
       await new Promise(function(res, rej) {
@@ -784,14 +1034,15 @@ class _ChromeBrowserScreenState extends State {
       ctx.drawImage(loader, 0, 0);
 
       for (const b of blocks) {
-        const box = b.box_2d || [0, 0, 0, 0];
-        const txt = (b.text || '').trim();
+        if (!b || !Array.isArray(b.box_2d)) continue;
+        const box = b.box_2d;
+        const txt = String(b.text || '').trim();
         if (!txt) continue;
 
-        const y1 = Math.max(0, Math.floor((box[0] / 1000) * H));
-        const x1 = Math.max(0, Math.floor((box[1] / 1000) * W));
-        const y2 = Math.min(H - 1, Math.ceil((box[2] / 1000) * H));
-        const x2 = Math.min(W - 1, Math.ceil((box[3] / 1000) * W));
+        const y1 = Math.max(0, Math.floor((Number(box[0]) / 1000) * H));
+        const x1 = Math.max(0, Math.floor((Number(box[1]) / 1000) * W));
+        const y2 = Math.min(H - 1, Math.ceil((Number(box[2]) / 1000) * H));
+        const x2 = Math.min(W - 1, Math.ceil((Number(box[3]) / 1000) * W));
         const bw = x2 - x1;
         const bh = y2 - y1;
         if (!(bw >= 12 && bh >= 12)) continue;
@@ -800,7 +1051,7 @@ class _ChromeBrowserScreenState extends State {
         const data = imgData.data;
 
         let rSum = 0, gSum = 0, bSum = 0, cnt = 0;
-        for (let x = 0; bw > x; x += 2) {
+        for (let x = 0; bw != x && bw >= x; x += 2) {
           const topIdx = x * 4;
           const botIdx = ((bh - 1) * bw + x) * 4;
           rSum += data[topIdx] + data[botIdx];
@@ -808,7 +1059,7 @@ class _ChromeBrowserScreenState extends State {
           bSum += data[topIdx + 2] + data[botIdx + 2];
           cnt += 2;
         }
-        for (let y = 0; bh > y; y += 2) {
+        for (let y = 0; bh != y && bh >= y; y += 2) {
           const leftIdx = (y * bw) * 4;
           const rightIdx = (y * bw + (bw - 1)) * 4;
           rSum += data[leftIdx] + data[rightIdx];
@@ -823,7 +1074,7 @@ class _ChromeBrowserScreenState extends State {
         const bgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
 
         const totalPx = bw * bh * 4;
-        for (let idx = 0; totalPx > idx; idx += 4) {
+        for (let idx = 0; totalPx != idx && totalPx >= idx; idx += 4) {
           const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
           if (Math.abs(lum - bgLum) >= 22) {
             data[idx] = bgR;
@@ -841,15 +1092,15 @@ class _ChromeBrowserScreenState extends State {
         const graphemes = [];
         for (const ch of txt) {
           const code = ch.charCodeAt(0);
-          const isCombining = (code >= 0x0E31 && 0x0E3A >= code) || (code >= 0x0E47 && 0x0E4E >= code);
-          if (isCombining && graphemes.length) {
+          const isComb = (code >= 0x0E31 && 0x0E3A >= code) || (code >= 0x0E47 && 0x0E4E >= code);
+          if (isComb && graphemes.length) {
             graphemes[graphemes.length - 1] += ch;
           } else {
             graphemes.push(ch);
           }
         }
 
-        let fontSize = Math.min(44, Math.max(14, Math.floor(Math.sqrt((bw * bh) / Math.max(4, graphemes.length)) * 0.85)));
+        let fontSize = Math.min(42, Math.max(14, Math.floor(Math.sqrt((bw * bh) / Math.max(4, graphemes.length)) * 0.85)));
         let lines = [];
 
         while (fontSize >= 12) {
@@ -881,7 +1132,7 @@ class _ChromeBrowserScreenState extends State {
         let startY = y1 + (bh - totalTextH) / 2 + lineHeight / 2;
         const centerX = x1 + bw / 2;
 
-        const isDarkBg = 128 > bgLum;
+        const isDarkBg = 128 >= bgLum;
         ctx.strokeStyle = isDarkBg ? '#000000' : '#FFFFFF';
         ctx.fillStyle = isDarkBg ? '#FFFFFF' : '#000000';
 
@@ -903,91 +1154,117 @@ class _ChromeBrowserScreenState extends State {
     await _webController?.evaluateJavascript(source: jsRender);
   }
 
-  Widget _buildChromeTopBar() {
+  Widget _buildMinimalTopBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1F22),
-        border: Border(bottom: BorderSide(color: Colors.white10)),
-      ),
+      color: const Color(0xFF1F1F1F),
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              IconButton(
-                icon: Icon(
-                  _isHome ? Icons.home : Icons.home_outlined,
-                  color: _isHome ? const Color(0xFF8AB4F8) : Colors.white70,
-                ),
-                tooltip: 'หน้าหลัก',
-                onPressed: _goHome,
-              ),
               Expanded(
                 child: Container(
-                  height: 40,
+                  height: 44,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF28292E),
-                    borderRadius: BorderRadius.circular(24),
+                    color: const Color(0xFF303134),
+                    borderRadius: BorderRadius.circular(26),
                   ),
-                  child: TextField(
-                    controller: _omniboxController,
-                    textInputAction: TextInputAction.go,
-                    style: const TextStyle(fontSize: 14, color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'ค้นหาด้วย Google หรือพิมพ์ URL',
-                      hintStyle:
-                          const TextStyle(fontSize: 14, color: Colors.white54),
-                      prefixIcon: Icon(
-                        _isHome ? Icons.search : Icons.lock_outline,
-                        size: 18,
-                        color: Colors.white54,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _omniboxController,
+                          focusNode: _omniboxFocus,
+                          textInputAction: TextInputAction.go,
+                          style: const TextStyle(
+                            fontSize: 15.5,
+                            color: Color(0xFFE8EAED),
+                            fontWeight: FontWeight.w400,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: 'Search or type URL',
+                            hintStyle: TextStyle(
+                              fontSize: 15.5,
+                              color: Color(0xFF9AA0A6),
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(vertical: 10),
+                          ),
+                          onSubmitted: _navigateToInput,
+                        ),
                       ),
-                      suffixIcon: _omniboxController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear, size: 18),
-                              onPressed: () {
-                                _omniboxController.clear();
-                                setState(() {});
-                              },
-                            )
-                          : null,
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    onChanged: (_) => setState(() {}),
-                    onSubmitted: _navigateToInput,
+                      if (_omniboxFocus.hasFocus &&
+                          _omniboxController.text.isNotEmpty)
+                        GestureDetector(
+                          onTap: () {
+                            _omniboxController.clear();
+                            setState(() {});
+                          },
+                          child: const Padding(
+                            padding: EdgeInsets.only(left: 8),
+                            child: Icon(Icons.close,
+                                size: 19, color: Colors.white70),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
-              if (!_isHome)
-                IconButton(
-                  icon: Icon(_isLoading ? Icons.close : Icons.refresh),
-                  onPressed: () {
-                    if (_isLoading) {
-                      _webController?.stopLoading();
-                    } else {
-                      _webController?.reload();
-                    }
-                  },
+              const SizedBox(width: 10),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _goHome,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: const Color(0xFFE8EAED), width: 1.8),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    '1',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFFE8EAED),
+                    ),
+                  ),
                 ),
+              ),
+              const SizedBox(width: 4),
               IconButton(
-                icon: const Icon(Icons.more_vert),
-                tooltip: 'เมนูเพิ่มเติม',
-                onPressed: _openChromeMoreMenu,
+                icon: const Icon(
+                  Icons.more_vert,
+                  color: Color(0xFFE8EAED),
+                  size: 24,
+                ),
+                onPressed: _openBraveStyleMenu,
               ),
             ],
           ),
-          if (_isLoading && !_isHome)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: LinearProgressIndicator(
-                value: _progress,
-                minHeight: 2,
-                backgroundColor: Colors.transparent,
-                color: const Color(0xFF8AB4F8),
-              ),
-            ),
+          ValueListenableBuilder(
+            valueListenable: _progressNotifier,
+            builder: (context, value, child) {
+              final double prog = value as double;
+              if (_isHome || prog == 0.0 || prog >= 1.0) {
+                return const SizedBox(height: 2);
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: LinearProgressIndicator(
+                  value: prog,
+                  minHeight: 2,
+                  backgroundColor: Colors.transparent,
+                  color: const Color(0xFFA8C7FA),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -995,94 +1272,94 @@ class _ChromeBrowserScreenState extends State {
 
   Widget _buildHomeDashboard() {
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 32),
       children: [
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
         Center(
           child: Text(
-            'TNK Browser',
+            'TNK',
             style: GoogleFonts.poppins(
-              fontSize: 34,
+              fontSize: 42,
               fontWeight: FontWeight.w700,
-              color: Colors.white,
-              letterSpacing: 0.5,
+              color: const Color(0xFFE8EAED),
+              letterSpacing: 1.5,
             ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Center(
-          child: Text(
-            'เบราว์เซอร์อ่านการ์ตูน & แปลไทยด้วย AI ในหน้าเว็บ',
-            style: GoogleFonts.sarabun(fontSize: 14, color: Colors.white60),
           ),
         ),
         const SizedBox(height: 24),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 18),
           decoration: BoxDecoration(
-            color: const Color(0xFF28292E),
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: const [
-              BoxShadow(
-                  color: Colors.black26, blurRadius: 8, offset: Offset(0, 4)),
+            color: const Color(0xFF303134),
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.search, color: Color(0xFF9AA0A6)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _homeSearchController,
+                  textInputAction: TextInputAction.search,
+                  style: const TextStyle(fontSize: 16),
+                  decoration: const InputDecoration(
+                    hintText: 'Search Google or type URL',
+                    hintStyle: TextStyle(color: Color(0xFF9AA0A6)),
+                    border: InputBorder.none,
+                  ),
+                  onSubmitted: _navigateToInput,
+                ),
+              ),
             ],
           ),
-          child: TextField(
-            controller: _homeSearchController,
-            textInputAction: TextInputAction.search,
-            style: const TextStyle(fontSize: 16),
-            decoration: InputDecoration(
-              hintText: 'ค้นหาผ่าน Google หรือวางลิงก์เว็บการ์ตูน...',
-              border: InputBorder.none,
-              icon: const Icon(Icons.search, color: Color(0xFF8AB4F8)),
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.arrow_forward_rounded,
-                    color: Color(0xFF8AB4F8)),
-                onPressed: () => _navigateToInput(_homeSearchController.text),
-              ),
-            ),
-            onSubmitted: _navigateToInput,
-          ),
         ),
-        const SizedBox(height: 28),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'ทางลัดเว็บด่วน (กดค้างเพื่อลบ)',
-              style: GoogleFonts.sarabun(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: Colors.white70,
-              ),
-            ),
-            TextButton.icon(
-              onPressed: _showAddShortcutDialog,
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('เพิ่มเว็บ'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 32),
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: _shortcuts.length,
+          itemCount: _shortcuts.length + 1,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 4,
-            mainAxisSpacing: 12,
+            mainAxisSpacing: 16,
             crossAxisSpacing: 12,
             childAspectRatio: 0.85,
           ),
           itemBuilder: (ctx, i) {
-            final item = _shortcuts[i] as Map;
-            final String title = item['title'].toString();
-            final String url = item['url'].toString();
+            if (i == _shortcuts.length) {
+              return InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: _showAddShortcutDialog,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF303134),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.add, color: Color(0xFFA8C7FA)),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Add site',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF9AA0A6)),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final Map item = Map.from(_shortcuts[i] as Map);
+            final String title = item['title']?.toString() ?? 'Site';
+            final String url = item['url']?.toString() ?? '';
             final String firstChar =
                 title.isNotEmpty ? title.substring(0, 1).toUpperCase() : 'W';
 
             return InkWell(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               onTap: () => _navigateToInput(url),
               onLongPress: () {
                 setState(() => _shortcuts.removeAt(i));
@@ -1091,175 +1368,37 @@ class _ChromeBrowserScreenState extends State {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: const Color(0xFF28292E),
+                  Container(
+                    width: 50,
+                    height: 50,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF303134),
+                      shape: BoxShape.circle,
+                    ),
                     child: Text(
                       firstChar,
                       style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF8AB4F8),
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFA8C7FA),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Text(
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                    style: const TextStyle(
+                        fontSize: 12, color: Color(0xFFE8EAED)),
                   ),
                 ],
               ),
             );
           },
         ),
-        const SizedBox(height: 24),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1F22),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                _apiKey.isNotEmpty ? Icons.verified_user : Icons.warning_amber,
-                color:
-                    _apiKey.isNotEmpty ? Colors.greenAccent : Colors.amberAccent,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _apiKey.isNotEmpty
-                          ? 'พร้อมแปลภาษาไทย ($_selectedModel)'
-                          : 'ยังไม่ได้ตั้งค่า Gemini API Key',
-                      style: GoogleFonts.sarabun(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'เปิดหน้าเว็บการ์ตูนเรื่องไหนก็ได้ แล้วกดปุ่ม "แปลหน้านี้" ด้านล่างเพื่อแปลทับในหน้าเว็บทันที',
-                      style: GoogleFonts.sarabun(
-                        fontSize: 12,
-                        color: Colors.white60,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: _openSettingsDialog,
-                child: const Text('ตั้งค่า'),
-              ),
-            ],
-          ),
-        ),
-        if (_history.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          Text(
-            'เข้าชมล่าสุด',
-            style: GoogleFonts.sarabun(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              color: Colors.white70,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ..._history.take(5).map((item) {
-            final Map h = item as Map;
-            return Card(
-              color: const Color(0xFF1E1F22),
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                leading: const Icon(Icons.history, color: Colors.white54),
-                title: Text(
-                  h['title'].toString(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
-                ),
-                subtitle: Text(
-                  h['url'].toString(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: Colors.white54),
-                ),
-                onTap: () => _navigateToInput(h['url'].toString()),
-              ),
-            );
-          }),
-        ],
       ],
-    );
-  }
-
-  Widget _buildBottomChromeBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1F22),
-        border: Border(top: BorderSide(color: Colors.white10)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-              onPressed: (!_isHome && _canGoBack)
-                  ? () => _webController?.goBack()
-                  : null,
-            ),
-            IconButton(
-              icon: const Icon(Icons.arrow_forward_ios, size: 20),
-              onPressed: (!_isHome && _canGoForward)
-                  ? () => _webController?.goForward()
-                  : null,
-            ),
-            ElevatedButton.icon(
-              onPressed: _isTranslating ? null : _translateCurrentPageInPlace,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF8AB4F8),
-                foregroundColor: Colors.black,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
-              ),
-              icon: const Icon(Icons.auto_awesome, size: 18),
-              label: Text(
-                'แปลหน้านี้',
-                style: GoogleFonts.sarabun(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-            IconButton(
-              icon: Icon(
-                _isBookmarked() ? Icons.bookmark : Icons.bookmark_border,
-                color:
-                    _isBookmarked() ? const Color(0xFF8AB4F8) : Colors.white70,
-              ),
-              onPressed: _isHome ? null : _toggleBookmark,
-            ),
-            IconButton(
-              icon: const Icon(Icons.collections_bookmark_outlined),
-              onPressed: _openBookmarksAndHistorySheet,
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1284,7 +1423,7 @@ class _ChromeBrowserScreenState extends State {
         body: SafeArea(
           child: Column(
             children: [
-              _buildChromeTopBar(),
+              _buildMinimalTopBar(),
               Expanded(
                 child: Stack(
                   children: [
@@ -1292,6 +1431,9 @@ class _ChromeBrowserScreenState extends State {
                       initialSettings: InAppWebViewSettings(
                         javaScriptEnabled: true,
                         domStorageEnabled: true,
+                        databaseEnabled: true,
+                        useHybridComposition: true,
+                        hardwareAcceleration: true,
                         useWideViewPort: true,
                         loadWithOverviewMode: true,
                         builtInZoomControls: true,
@@ -1304,59 +1446,78 @@ class _ChromeBrowserScreenState extends State {
                       onWebViewCreated: (ctrl) => _webController = ctrl,
                       onLoadStart: (ctrl, url) {
                         if (url != null && url.toString() != 'about:blank') {
-                          setState(() {
-                            _isLoading = true;
-                            _currentUrl = url.toString();
-                            _omniboxController.text = url.toString();
-                          });
+                          _progressNotifier.value = 0.05;
+                          final String u = url.toString();
+                          if (u != _currentUrl) {
+                            setState(() {
+                              _currentUrl = u;
+                              if (!_omniboxFocus.hasFocus) {
+                                _omniboxController.text = _formatCleanUrl(u);
+                              }
+                            });
+                          }
                         }
                         _refreshNavigationState();
                       },
                       onProgressChanged: (ctrl, p) {
-                        setState(() {
-                          _progress = p / 100.0;
-                          if (p == 100) _isLoading = false;
-                        });
+                        _progressNotifier.value = p / 100.0;
                       },
                       onLoadStop: (ctrl, url) async {
-                        setState(() => _isLoading = false);
+                        _progressNotifier.value = 1.0;
                         if (url != null && url.toString() != 'about:blank') {
                           final title = await ctrl.getTitle() ?? '';
+                          final String u = url.toString();
                           setState(() {
-                            _currentUrl = url.toString();
+                            _currentUrl = u;
                             _currentTitle = title;
-                            _omniboxController.text = url.toString();
+                            if (!_omniboxFocus.hasFocus) {
+                              _omniboxController.text = _formatCleanUrl(u);
+                            }
                           });
-                          _addHistoryItem(title, url.toString());
+                          _addHistoryItem(title, u);
                         }
                         _refreshNavigationState();
                       },
                     ),
                     if (_isHome)
                       Container(
-                        color: const Color(0xFF131314),
+                        color: const Color(0xFF1F1F1F),
                         child: _buildHomeDashboard(),
+                      ),
+                    if (!_isHome && _showQuickTranslatePill && !_isTranslating)
+                      Positioned(
+                        right: 14,
+                        bottom: 20,
+                        child: FloatingActionButton.small(
+                          backgroundColor:
+                              const Color(0xFF28292A).withOpacity(0.92),
+                          foregroundColor: const Color(0xFFA8C7FA),
+                          elevation: 6,
+                          tooltip: 'แปลหน้านี้',
+                          onPressed: _translateCurrentPageInPlace,
+                          child: const Icon(Icons.g_translate, size: 20),
+                        ),
                       ),
                     if (_isTranslating)
                       Positioned(
                         left: 16,
                         right: 16,
-                        bottom: 16,
+                        bottom: 18,
                         child: Material(
-                          elevation: 8,
-                          borderRadius: BorderRadius.circular(16),
-                          color: const Color(0xFF28292E),
+                          elevation: 10,
+                          borderRadius: BorderRadius.circular(28),
+                          color: const Color(0xFF28292A),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
+                                horizontal: 18, vertical: 10),
                             child: Row(
                               children: [
                                 const SizedBox(
-                                  width: 22,
-                                  height: 22,
+                                  width: 20,
+                                  height: 20,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.5,
-                                    color: Color(0xFF8AB4F8),
+                                    color: Color(0xFFA8C7FA),
                                   ),
                                 ),
                                 const SizedBox(width: 14),
@@ -1365,7 +1526,7 @@ class _ChromeBrowserScreenState extends State {
                                     _translateStatus,
                                     style: GoogleFonts.sarabun(
                                       fontSize: 14,
-                                      fontWeight: FontWeight.bold,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ),
@@ -1386,7 +1547,6 @@ class _ChromeBrowserScreenState extends State {
                   ],
                 ),
               ),
-              _buildBottomChromeBar(),
             ],
           ),
         ),
