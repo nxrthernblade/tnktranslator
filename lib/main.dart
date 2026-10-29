@@ -1,166 +1,116 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
-import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const HiaTranslatorApp());
+  runApp(const TnkBrowserApp());
 }
 
-class HiaTranslatorApp extends StatelessWidget {
-  const HiaTranslatorApp({super.key});
+class TnkBrowserApp extends StatelessWidget {
+  const TnkBrowserApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'TNK Translator',
+      title: 'TNK Browser',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        primaryColor: Colors.deepPurple,
-        scaffoldBackgroundColor: const Color(0xFF121212),
+      theme: ThemeData.dark(useMaterial3: true).copyWith(
+        scaffoldBackgroundColor: const Color(0xFF131314),
         colorScheme: const ColorScheme.dark(
-          primary: Colors.deepPurpleAccent,
-          secondary: Colors.amberAccent,
+          primary: Color(0xFF8AB4F8),
+          secondary: Color(0xFFC58AF9),
+          surface: Color(0xFF1E1F22),
         ),
       ),
-      home: const MangaBrowserScreen(),
+      home: const ChromeBrowserScreen(),
     );
   }
 }
 
-class TextBlock {
-  final int ymin, xmin, ymax, xmax;
-  final String text;
-
-  TextBlock({
-    required this.ymin,
-    required this.xmin,
-    required this.ymax,
-    required this.xmax,
-    required this.text,
-  });
-
-  factory TextBlock.fromJson(Map json) {
-    final List box = List.from(json['box_2d'] ?? [0, 0, 100, 100]);
-    return TextBlock(
-      ymin: (box[0] as num).toInt().clamp(0, 1000),
-      xmin: (box[1] as num).toInt().clamp(0, 1000),
-      ymax: (box[2] as num).toInt().clamp(0, 1000),
-      xmax: (box[3] as num).toInt().clamp(0, 1000),
-      text: json['text']?.toString() ?? '',
-    );
-  }
-}
-
-class TranslatedPageData {
-  final Uint8List cleanedImageBytes;
-  final int imageWidth;
-  final int imageHeight;
-  final List blocks;
-
-  TranslatedPageData({
-    required this.cleanedImageBytes,
-    required this.imageWidth,
-    required this.imageHeight,
-    required this.blocks,
-  });
-}
-
-Map cleanMangaImageIsolate(Map params) {
-  final Uint8List bytes = params['bytes'] as Uint8List;
-  final List rawBlocks = params['blocks'] as List;
-
-  final img.Image? decoded = img.decodeImage(bytes);
-  if (decoded == null) {
-    return {'bytes': bytes, 'width': 1, 'height': 1};
-  }
-
-  for (final dynamic b in rawBlocks) {
-    final Map blockMap = b as Map;
-    final List box = blockMap['box_2d'] as List;
-    final int x1 = ((box[1] as num) * decoded.width ~/ 1000).clamp(0, decoded.width - 1);
-    final int y1 = ((box[0] as num) * decoded.height ~/ 1000).clamp(0, decoded.height - 1);
-    final int x2 = ((box[3] as num) * decoded.width ~/ 1000).clamp(0, decoded.width - 1);
-    final int y2 = ((box[2] as num) * decoded.height ~/ 1000).clamp(0, decoded.height - 1);
-
-    int rSum = 0, gSum = 0, bSum = 0, count = 0;
-    for (int x = x1; x <= x2; x += 2) {
-      final pTop = decoded.getPixel(x, y1);
-      final pBot = decoded.getPixel(x, y2);
-      rSum += pTop.r.toInt() + pBot.r.toInt();
-      gSum += pTop.g.toInt() + pBot.g.toInt();
-      bSum += pTop.b.toInt() + pBot.b.toInt();
-      count += 2;
-    }
-    for (int y = y1; y <= y2; y += 2) {
-      final pLeft = decoded.getPixel(x1, y);
-      final pRight = decoded.getPixel(x2, y);
-      rSum += pLeft.r.toInt() + pRight.r.toInt();
-      gSum += pLeft.g.toInt() + pRight.g.toInt();
-      bSum += pLeft.b.toInt() + pRight.b.toInt();
-      count += 2;
-    }
-
-    final int bgR = count != 0 ? (rSum ~/ count) : 255;
-    final int bgG = count != 0 ? (gSum ~/ count) : 255;
-    final int bgB = count != 0 ? (bSum ~/ count) : 255;
-    final double bgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
-
-    for (int y = y1; y <= y2; y++) {
-      for (int x = x1; x <= x2; x++) {
-        final p = decoded.getPixel(x, y);
-        final double lum = 0.299 * p.r + 0.587 * p.g + 0.114 * p.b;
-        if ((lum - bgLum).abs() >= 28) {
-          decoded.setPixelRgb(x, y, bgR, bgG, bgB);
-        }
-      }
-    }
-  }
-
-  return {
-    'bytes': Uint8List.fromList(img.encodeJpg(decoded, quality: 90)),
-    'width': decoded.width,
-    'height': decoded.height,
-  };
-}
-
-class MangaBrowserScreen extends StatefulWidget {
-  const MangaBrowserScreen({super.key});
+class ChromeBrowserScreen extends StatefulWidget {
+  const ChromeBrowserScreen({super.key});
 
   @override
-  State createState() => _MangaBrowserScreenState();
+  State createState() => _ChromeBrowserScreenState();
 }
 
-class _MangaBrowserScreenState extends State {
-  InAppWebViewController? _webViewController;
-  final TextEditingController _urlController =
-      TextEditingController(text: 'https://manganato.com');
+class _ChromeBrowserScreenState extends State {
+  InAppWebViewController? _webController;
+  final TextEditingController _omniboxController = TextEditingController();
+  final TextEditingController _homeSearchController = TextEditingController();
+
+  bool _isHome = true;
+  bool _isLoading = false;
+  double _progress = 0.0;
+  String _currentUrl = '';
+  String _currentTitle = 'หน้าหลัก';
+  bool _canGoBack = false;
+  bool _canGoForward = false;
+  bool _isDesktopMode = false;
+
   String _apiKey = '';
   String _selectedModel = 'gemini-2.5-flash';
-  bool _isWorking = false;
-  String _statusMessage = '';
+
+  bool _isTranslating = false;
+  bool _cancelRequested = false;
+  String _translateStatus = '';
+
+  List _shortcuts = [];
+  List _bookmarks = [];
+  List _history = [];
+
+  static const String _mobileUA =
+      'Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
+  static const String _desktopUA =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    _loadAllData();
   }
 
-  Future _loadSettings() async {
+  Future _loadAllData() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedShortcuts = prefs.getString('tnk_shortcuts');
+    final savedBookmarks = prefs.getString('tnk_bookmarks');
+    final savedHistory = prefs.getString('tnk_history');
+
+    List defaultShortcuts = [
+      {'title': 'Google', 'url': 'https://www.google.com'},
+      {'title': 'MangaDex', 'url': 'https://mangadex.org'},
+      {'title': 'Webtoons', 'url': 'https://www.webtoons.com'},
+      {'title': 'Naver Webtoon', 'url': 'https://m.comic.naver.com'},
+      {'title': 'KakaoPage', 'url': 'https://page.kakao.com'},
+      {'title': 'Reddit', 'url': 'https://www.reddit.com'},
+    ];
+
     setState(() {
       _apiKey = prefs.getString('gemini_api_key') ?? '';
       _selectedModel = prefs.getString('gemini_model') ?? 'gemini-2.5-flash';
+      _shortcuts = savedShortcuts != null
+          ? (jsonDecode(savedShortcuts) as List)
+          : defaultShortcuts;
+      _bookmarks =
+          savedBookmarks != null ? (jsonDecode(savedBookmarks) as List) : [];
+      _history =
+          savedHistory != null ? (jsonDecode(savedHistory) as List) : [];
     });
   }
 
-  Future _saveSettings(String key, String model) async {
+  Future _saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('tnk_shortcuts', jsonEncode(_shortcuts));
+    await prefs.setString('tnk_bookmarks', jsonEncode(_bookmarks));
+    await prefs.setString('tnk_history', jsonEncode(_history));
+  }
+
+  Future _saveApiSettings(String key, String model) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('gemini_api_key', key.trim());
     await prefs.setString('gemini_model', model.trim());
@@ -170,6 +120,163 @@ class _MangaBrowserScreenState extends State {
     });
   }
 
+  void _navigateToInput(String rawInput) {
+    final String input = rawInput.trim();
+    if (input.isEmpty) return;
+
+    String targetUrl;
+    final bool hasSpace = input.contains(' ');
+    final bool hasDot = input.contains('.');
+
+    if (input.startsWith('http://') || input.startsWith('https://')) {
+      targetUrl = input;
+    } else if (!hasSpace && hasDot) {
+      targetUrl = 'https://$input';
+    } else {
+      targetUrl =
+          'https://www.google.com/search?q=${Uri.encodeComponent(input)}';
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isHome = false;
+      _currentUrl = targetUrl;
+      _omniboxController.text = targetUrl;
+    });
+
+    _webController?.loadUrl(urlRequest: URLRequest(url: WebUri(targetUrl)));
+  }
+
+  void _goHome() {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isHome = true;
+      _omniboxController.clear();
+      _homeSearchController.clear();
+    });
+  }
+
+  void _addHistoryItem(String title, String url) {
+    if (url.isEmpty || url == 'about:blank') return;
+    _history.removeWhere((item) => (item as Map)['url'] == url);
+    _history.insert(0, {
+      'title': title.isEmpty ? url : title,
+      'url': url,
+    });
+    if (_history.length >= 40) {
+      _history = _history.take(40).toList();
+    }
+    _saveData();
+  }
+
+  bool _isBookmarked() {
+    return _bookmarks.any((item) => (item as Map)['url'] == _currentUrl);
+  }
+
+  void _toggleBookmark() {
+    if (_isHome || _currentUrl.isEmpty) return;
+    setState(() {
+      if (_isBookmarked()) {
+        _bookmarks.removeWhere((item) => (item as Map)['url'] == _currentUrl);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ลบออกจากบุ๊กมาร์กแล้ว')),
+        );
+      } else {
+        _bookmarks.insert(0, {
+          'title': _currentTitle.isEmpty ? _currentUrl : _currentTitle,
+          'url': _currentUrl,
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('บันทึกบุ๊กมาร์กเรียบร้อย')),
+        );
+      }
+    });
+    _saveData();
+  }
+
+  void _toggleDesktopMode() async {
+    setState(() {
+      _isDesktopMode = !_isDesktopMode;
+    });
+    if (_webController != null) {
+      await _webController!.setSettings(
+        settings: InAppWebViewSettings(
+          userAgent: _isDesktopMode ? _desktopUA : _mobileUA,
+          preferredContentMode: _isDesktopMode
+              ? UserPreferredContentMode.DESKTOP
+              : UserPreferredContentMode.RECOMMENDED,
+        ),
+      );
+      await _webController!.reload();
+    }
+  }
+
+  Future _refreshNavigationState() async {
+    if (_webController == null) return;
+    final back = await _webController!.canGoBack();
+    final forward = await _webController!.canGoForward();
+    if (mounted) {
+      setState(() {
+        _canGoBack = back;
+        _canGoForward = forward;
+      });
+    }
+  }
+
+  void _showAddShortcutDialog() {
+    final titleCtrl = TextEditingController();
+    final urlCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1F22),
+        title: Text('เพิ่มทางลัดหน้าหลัก', style: GoogleFonts.sarabun()),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              decoration: const InputDecoration(
+                labelText: 'ชื่อเว็บ (เช่น MangaDex)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: urlCtrl,
+              decoration: const InputDecoration(
+                labelText: 'ลิงก์ URL (เช่น mangadex.org)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () {
+              String u = urlCtrl.text.trim();
+              if (u.isEmpty) return;
+              if (!u.startsWith('http')) u = 'https://$u';
+              final String t =
+                  titleCtrl.text.trim().isEmpty ? u : titleCtrl.text.trim();
+              setState(() {
+                _shortcuts.add({'title': t, 'url': u});
+              });
+              _saveData();
+              Navigator.pop(ctx);
+            },
+            child: const Text('เพิ่ม'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openSettingsDialog() {
     final keyCtrl = TextEditingController(text: _apiKey);
     final modelCtrl = TextEditingController(text: _selectedModel);
@@ -177,7 +284,11 @@ class _MangaBrowserScreenState extends State {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('ตั้งค่าระบบแปล (TNK Translator)'),
+        backgroundColor: const Color(0xFF1E1F22),
+        title: Text(
+          'ตั้งค่า AI แปลมังงะ',
+          style: GoogleFonts.sarabun(fontWeight: FontWeight.bold),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -195,14 +306,14 @@ class _MangaBrowserScreenState extends State {
             TextField(
               controller: modelCtrl,
               decoration: const InputDecoration(
-                labelText: 'ชื่อโมเดล Gemini',
-                hintText: 'gemini-2.5-flash หรือ gemini-1.5-flash',
+                labelText: 'รุ่นโมเดล (Model)',
+                hintText: 'gemini-2.5-flash',
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             const Text(
-              '* คีย์ถูกเซฟไว้ในความจำมือถือเครื่องนี้เท่านั้น ปลอดภัย 100%',
+              'แนะนำใช้ gemini-2.5-flash หรือ gemini-2.0-flash เพื่อความเร็วและแม่นยำในการสแกนกรอบคำพูด',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
@@ -212,12 +323,12 @@ class _MangaBrowserScreenState extends State {
             onPressed: () => Navigator.pop(ctx),
             child: const Text('ยกเลิก'),
           ),
-          ElevatedButton(
+          FilledButton(
             onPressed: () {
-              _saveSettings(keyCtrl.text, modelCtrl.text);
+              _saveApiSettings(keyCtrl.text, modelCtrl.text);
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('บันทึกตั้งค่าเรียบร้อย!')),
+                const SnackBar(content: Text('บันทึกการตั้งค่าเรียบร้อย')),
               );
             },
             child: const Text('บันทึก'),
@@ -227,169 +338,293 @@ class _MangaBrowserScreenState extends State {
     );
   }
 
-  Future _extractAndTranslatePage() async {
+  void _openBookmarksAndHistorySheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1F22),
+      isScrollControlled: true,
+      builder: (ctx) => DefaultTabController(
+        length: 2,
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.7,
+          child: Column(
+            children: [
+              const TabBar(
+                tabs: [
+                  Tab(icon: Icon(Icons.bookmark), text: 'บุ๊กมาร์ก'),
+                  Tab(icon: Icon(Icons.history), text: 'ประวัติเข้าเว็บ'),
+                ],
+              ),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _bookmarks.isEmpty
+                        ? const Center(child: Text('ยังไม่มีบุ๊กมาร์กที่บันทึกไว้'))
+                        : ListView.builder(
+                            itemCount: _bookmarks.length,
+                            itemBuilder: (c, i) {
+                              final item = _bookmarks[i] as Map;
+                              return ListTile(
+                                leading: const Icon(Icons.bookmark,
+                                    color: Color(0xFF8AB4F8)),
+                                title: Text(
+                                  item['title'].toString(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  item['url'].toString(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: () {
+                                    setState(() {
+                                      _bookmarks.removeAt(i);
+                                    });
+                                    _saveData();
+                                    Navigator.pop(ctx);
+                                    _openBookmarksAndHistorySheet();
+                                  },
+                                ),
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _navigateToInput(item['url'].toString());
+                                },
+                              );
+                            },
+                          ),
+                    _history.isEmpty
+                        ? const Center(child: Text('ยังไม่มีประวัติการเข้าชม'))
+                        : Column(
+                            children: [
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  onPressed: () {
+                                    setState(() => _history.clear());
+                                    _saveData();
+                                    Navigator.pop(ctx);
+                                  },
+                                  icon: const Icon(Icons.delete_sweep),
+                                  label: const Text('ล้างประวัติทั้งหมด'),
+                                ),
+                              ),
+                              Expanded(
+                                child: ListView.builder(
+                                  itemCount: _history.length,
+                                  itemBuilder: (c, i) {
+                                    final item = _history[i] as Map;
+                                    return ListTile(
+                                      leading: const Icon(Icons.public,
+                                          color: Colors.grey),
+                                      title: Text(
+                                        item['title'].toString(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      subtitle: Text(
+                                        item['url'].toString(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      onTap: () {
+                                        Navigator.pop(ctx);
+                                        _navigateToInput(
+                                            item['url'].toString());
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future _translateCurrentPageInPlace() async {
+    if (_isHome || _webController == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('เปิดหน้าเว็บการ์ตูนก่อนกดแปลนะเฮีย')),
+      );
+      return;
+    }
+
     if (_apiKey.isEmpty) {
       _openSettingsDialog();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ใส่ Gemini API Key ก่อนนะเฮีย!')),
+        const SnackBar(content: Text('กรอก Gemini API Key ก่อนเริ่มแปลนะครับ')),
       );
-      return null;
+      return;
     }
 
-    if (_webViewController == null) return null;
-
     setState(() {
-      _isWorking = true;
-      _statusMessage = 'กำลังเจาะดึงรูปภาพการ์ตูนจากหน้าเว็บ...';
+      _isTranslating = true;
+      _cancelRequested = false;
+      _translateStatus = 'กำลังสแกนหารูปการ์ตูนในหน้าเว็บ...';
     });
 
     try {
-      const String jsExtractor = """
+      const String jsFindAndExtract = """
       (async function() {
-        const imgs = Array.from(document.querySelectorAll('img'));
-        const mangaImgs = imgs.filter(function(img) {
+        const allImgs = Array.from(document.querySelectorAll('img'));
+        const targets = [];
+        let idx = 0;
+
+        for (const img of allImgs) {
+          idx++;
           const w = img.naturalWidth || img.width || img.clientWidth;
           const h = img.naturalHeight || img.height || img.clientHeight;
-          return w >= 280 && h >= 350;
-        });
+          if (!(w >= 260 && h >= 320)) continue;
+          if (img.dataset.tnkTranslated === '1') continue;
 
-        const results = [];
-        for (const img of mangaImgs) {
-          const src = img.currentSrc || img.src || img.dataset.src || img.getAttribute('data-lazy-src');
+          const rect = img.getBoundingClientRect();
+          const dist = Math.abs(rect.top);
+          const id = img.dataset.tnkId || ('tnk_img_' + Date.now() + '_' + idx);
+          img.dataset.tnkId = id;
+
+          const src = img.currentSrc || img.src || img.dataset.src || img.getAttribute('data-lazy-src') || '';
           if (!src) continue;
 
+          targets.push({ img: img, id: id, src: src, dist: dist });
+        }
+
+        targets.sort(function(a, b) { return a.dist - b.dist; });
+        const batch = targets.slice(0, 8);
+        const output = [];
+
+        for (const item of batch) {
+          const im = item.img;
+          let b64 = '';
           try {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.naturalWidth || img.width;
-            canvas.height = img.naturalHeight || img.height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-            results.push(dataUrl.split(',')[1]);
-          } catch (err) {
+            const c = document.createElement('canvas');
+            c.width = im.naturalWidth || im.width;
+            c.height = im.naturalHeight || im.height;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(im, 0, 0);
+            b64 = c.toDataURL('image/jpeg', 0.86).split(',')[1];
+          } catch (e1) {
             try {
-              const resp = await fetch(src, { credentials: 'include' });
-              const blob = await resp.blob();
-              const b64 = await new Promise(function(resolve) {
+              const r = await fetch(item.src, { credentials: 'include' });
+              const blob = await r.blob();
+              b64 = await new Promise(function(res) {
                 const reader = new FileReader();
                 reader.onloadend = function() {
-                  resolve(reader.result.split(',')[1]);
+                  res(reader.result.split(',')[1]);
                 };
                 reader.readAsDataURL(blob);
               });
-              if (b64) results.push(b64);
             } catch (e2) {
-              results.push("URL:" + src);
+              b64 = 'URL:' + item.src;
             }
           }
+          output.push({ id: item.id, data: b64 });
         }
-        return JSON.stringify(results);
+        return JSON.stringify(output);
       })();
       """;
 
-      final rawResult = await _webViewController!.evaluateJavascript(source: jsExtractor);
-      if (rawResult == null) throw Exception('ไม่สามารถดึงข้อมูลจากหน้าเว็บได้');
-
-      final List extractedList = jsonDecode(rawResult.toString()) as List;
-      if (extractedList.isEmpty) {
-        throw Exception('ไม่พบรูปหน้าการ์ตูนในหน้านี้ ลองเลื่อนหน้าจอให้รูปโหลดก่อนนะเฮีย');
+      final rawExtract =
+          await _webController!.evaluateJavascript(source: jsFindAndExtract);
+      if (rawExtract == null) {
+        throw Exception('ไม่สามารถดึงข้อมูลจากหน้าเว็บได้');
       }
 
-      final currentUrl = (await _webViewController!.getUrl())?.toString() ?? '';
-      final List imageBytesList = [];
-      final List limitedList = extractedList.take(8).toList();
+      final List items = jsonDecode(rawExtract.toString()) as List;
+      if (items.isEmpty) {
+        throw Exception(
+            'ไม่พบรูปหน้าการ์ตูนใหม่ให้แปล (ลองเลื่อนหน้าจอลงไปหน้าถัดไปดูนะเฮีย)');
+      }
 
-      for (final dynamic rawItem in limitedList) {
-        final String item = rawItem.toString();
-        if (item.startsWith('URL:')) {
-          final imgUrl = item.substring(4);
+      int count = 0;
+      for (final dynamic rawItem in items) {
+        if (_cancelRequested) break;
+        count++;
+        final Map itemMap = rawItem as Map;
+        final String imgId = itemMap['id'].toString();
+        String imgData = itemMap['data'].toString();
+
+        setState(() {
+          _translateStatus =
+              'กำลังคลีนและแปลหน้า $count / ${items.length} ทับลงในเว็บ...';
+        });
+
+        if (imgData.startsWith('URL:')) {
+          final String url = imgData.substring(4);
           final resp = await http.get(
-            Uri.parse(imgUrl),
+            Uri.parse(url),
             headers: {
-              'Referer': currentUrl,
-              'User-Agent':
-                  'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+              'Referer': _currentUrl,
+              'User-Agent': _isDesktopMode ? _desktopUA : _mobileUA,
             },
           );
           if (resp.statusCode == 200) {
-            imageBytesList.add(resp.bodyBytes);
+            imgData = base64Encode(resp.bodyBytes);
+          } else {
+            continue;
           }
-        } else {
-          imageBytesList.add(base64Decode(item));
         }
+
+        final List blocks = (await _requestGeminiBoxes(imgData)) as List;
+        if (_cancelRequested) break;
+
+        await _injectTranslatedCanvasIntoWeb(imgId, imgData, blocks);
       }
 
-      final List finalPages = [];
-      int pageIndex = 0;
-
-      for (final dynamic pageBytesObj in imageBytesList) {
-        pageIndex++;
-        setState(() {
-          _statusMessage = 'กำลังคลีนและแปลหน้าที่ $pageIndex / ${imageBytesList.length}...';
-        });
-
-        final Uint8List pageBytes = pageBytesObj as Uint8List;
-        final List rawBlocks = (await _callGeminiTranslate(pageBytes)) as List;
-
-        final Map cleanedResult = await compute(cleanMangaImageIsolate, {
-          'bytes': pageBytes,
-          'blocks': rawBlocks,
-        });
-
-        finalPages.add(
-          TranslatedPageData(
-            cleanedImageBytes: cleanedResult['bytes'] as Uint8List,
-            imageWidth: cleanedResult['width'] as int,
-            imageHeight: cleanedResult['height'] as int,
-            blocks: rawBlocks.map((e) => TextBlock.fromJson(Map.from(e as Map))).toList(),
+      if (mounted && !_cancelRequested) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('แปลทับในหน้าเว็บเสร็จแล้ว $count หน้า! เลื่อนอ่านต่อได้เลย'),
+            backgroundColor: Colors.green.shade700,
           ),
         );
       }
-
-      if (!mounted) return null;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => TranslatedReaderScreen(pages: finalPages),
-        ),
-      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('เกิดข้อผิดพลาด: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('เกิดข้อผิดพลาด: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
       if (mounted) {
         setState(() {
-          _isWorking = false;
-          _statusMessage = '';
+          _isTranslating = false;
+          _translateStatus = '';
         });
       }
     }
-    return null;
   }
 
-  Future _callGeminiTranslate(Uint8List imageBytes) async {
-    final String b64Image = base64Encode(imageBytes);
-    final Uri endpoint = Uri.parse(
+  Future _requestGeminiBoxes(String base64Jpeg) async {
+    final Uri uri = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$_selectedModel:generateContent?key=$_apiKey',
     );
 
     const String prompt = '''
-คุณคือนักแปลมังงะและมันฮวามืออาชีพ สแกนหาบอลลูนคำพูดและข้อความทั้งหมดในภาพนี้ แล้วแปลเป็นภาษาไทยที่เป็นธรรมชาติ เข้ากับบริบทตัวละคร ไม่แปลแข็งทื่อ
-ส่งค่ากลับมาเป็น JSON Array เท่านั้น ตามโครงสร้างนี้:
+คุณคือนักแปลมังงะและมันฮวามืออาชีพ สแกนหาบอลลูนคำพูดและข้อความสำคัญในภาพนี้ แล้วแปลเป็นภาษาไทยที่ลื่นไหล เข้ากับอารมณ์ตัวละคร
+ส่งกลับมาเป็น JSON Array เท่านั้น ตามโครงสร้างนี้:
 [
   {
     "box_2d": [ymin, xmin, ymax, xmax],
     "text": "คำแปลภาษาไทย"
   }
 ]
-โดยพิกัด box_2d ต้องเป็นตัวเลขสเกล 0 ถึง 1000 ที่ครอบทับตัวอักษรต้นฉบับพอดี ห้ามใส่ข้อความอธิบายอื่นนอกเหนือจาก JSON
+โดยพิกัด box_2d เป็นสเกล 0 ถึง 1000 ที่คลุมเฉพาะตัวอักษรต้นฉบับในบอลลูน ห้ามใส่ข้อความอื่นนอกเหนือจาก JSON
 ''';
 
     final response = await http.post(
-      endpoint,
+      uri,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'contents': [
@@ -399,7 +634,7 @@ class _MangaBrowserScreenState extends State {
               {
                 'inline_data': {
                   'mime_type': 'image/jpeg',
-                  'data': b64Image,
+                  'data': base64Jpeg,
                 }
               }
             ]
@@ -413,200 +648,740 @@ class _MangaBrowserScreenState extends State {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Gemini API Error (${response.statusCode}): ${response.body}');
+      throw Exception('API Error (${response.statusCode}): ${response.body}');
     }
 
-    final data = jsonDecode(utf8.decode(response.bodyBytes));
-    final candidates = data['candidates'] as List?;
+    final Map decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map;
+    final List? candidates = decoded['candidates'] as List?;
     if (candidates == null || candidates.isEmpty) return [];
 
-    String rawJson = candidates[0]['content']['parts'][0]['text'].toString().trim();
+    String rawJson =
+        candidates[0]['content']['parts'][0]['text'].toString().trim();
     rawJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
 
     final List parsed = jsonDecode(rawJson) as List;
-    return parsed.map((e) => Map.from(e as Map)).toList();
+    return parsed;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 4,
-        title: TextField(
-          controller: _urlController,
-          style: const TextStyle(fontSize: 14),
-          decoration: InputDecoration(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            filled: true,
-            fillColor: Colors.black26,
-            hintText: 'ใส่ลิงก์เว็บอ่านมังงะ/มันฮวา...',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide.none,
+  Future _injectTranslatedCanvasIntoWeb(
+      String imgId, String base64Image, List blocks) async {
+    final String blocksB64 = base64Encode(utf8.encode(jsonEncode(blocks)));
+
+    final String jsRender = """
+    (async function() {
+      const targetImg = document.querySelector('img[data-tnk-id="$imgId"]');
+      if (!targetImg) return;
+
+      const blocks = JSON.parse(new TextDecoder().decode(
+        Uint8Array.from(atob('$blocksB64'), function(c) { return c.charCodeAt(0); })
+      ));
+
+      const loader = new Image();
+      await new Promise(function(res, rej) {
+        loader.onload = res;
+        loader.onerror = rej;
+        loader.src = 'data:image/jpeg;base64,$base64Image';
+      });
+
+      const W = loader.naturalWidth || loader.width;
+      const H = loader.naturalHeight || loader.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(loader, 0, 0);
+
+      for (const b of blocks) {
+        const box = b.box_2d || [0, 0, 0, 0];
+        const txt = (b.text || '').trim();
+        if (!txt) continue;
+
+        const y1 = Math.max(0, Math.floor((box[0] / 1000) * H));
+        const x1 = Math.max(0, Math.floor((box[1] / 1000) * W));
+        const y2 = Math.min(H - 1, Math.ceil((box[2] / 1000) * H));
+        const x2 = Math.min(W - 1, Math.ceil((box[3] / 1000) * W));
+        const bw = x2 - x1;
+        const bh = y2 - y1;
+        if (!(bw >= 12 && bh >= 12)) continue;
+
+        const imgData = ctx.getImageData(x1, y1, bw, bh);
+        const data = imgData.data;
+
+        let rSum = 0, gSum = 0, bSum = 0, cnt = 0;
+        for (let x = 0; bw > x; x += 2) {
+          const topIdx = x * 4;
+          const botIdx = ((bh - 1) * bw + x) * 4;
+          rSum += data[topIdx] + data[botIdx];
+          gSum += data[topIdx + 1] + data[botIdx + 1];
+          bSum += data[topIdx + 2] + data[botIdx + 2];
+          cnt += 2;
+        }
+        for (let y = 0; bh > y; y += 2) {
+          const leftIdx = (y * bw) * 4;
+          const rightIdx = (y * bw + (bw - 1)) * 4;
+          rSum += data[leftIdx] + data[rightIdx];
+          gSum += data[leftIdx + 1] + data[rightIdx + 1];
+          bSum += data[leftIdx + 2] + data[rightIdx + 2];
+          cnt += 2;
+        }
+
+        const bgR = cnt ? Math.round(rSum / cnt) : 255;
+        const bgG = cnt ? Math.round(gSum / cnt) : 255;
+        const bgB = cnt ? Math.round(bSum / cnt) : 255;
+        const bgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+
+        const totalPx = bw * bh * 4;
+        for (let idx = 0; totalPx > idx; idx += 4) {
+          const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+          if (Math.abs(lum - bgLum) >= 22) {
+            data[idx] = bgR;
+            data[idx + 1] = bgG;
+            data[idx + 2] = bgB;
+          }
+        }
+        ctx.putImageData(imgData, x1, y1);
+
+        ctx.fillStyle = 'rgb(' + bgR + ',' + bgG + ',' + bgB + ')';
+        const padX = Math.floor(bw * 0.04);
+        const padY = Math.floor(bh * 0.04);
+        ctx.fillRect(x1 + padX, y1 + padY, Math.max(4, bw - padX * 2), Math.max(4, bh - padY * 2));
+
+        const graphemes = [];
+        for (const ch of txt) {
+          const code = ch.charCodeAt(0);
+          const isCombining = (code >= 0x0E31 && 0x0E3A >= code) || (code >= 0x0E47 && 0x0E4E >= code);
+          if (isCombining && graphemes.length) {
+            graphemes[graphemes.length - 1] += ch;
+          } else {
+            graphemes.push(ch);
+          }
+        }
+
+        let fontSize = Math.min(44, Math.max(14, Math.floor(Math.sqrt((bw * bh) / Math.max(4, graphemes.length)) * 0.85)));
+        let lines = [];
+
+        while (fontSize >= 12) {
+          ctx.font = 'bold ' + fontSize + 'px sans-serif';
+          lines = [];
+          let curLine = '';
+          for (const g of graphemes) {
+            const testLine = curLine + g;
+            if (ctx.measureText(testLine).width >= bw * 0.94 && curLine.length) {
+              lines.push(curLine);
+              curLine = g;
+            } else {
+              curLine = testLine;
+            }
+          }
+          if (curLine) lines.push(curLine);
+          if (bh * 0.95 >= lines.length * fontSize * 1.22) break;
+          fontSize -= 2;
+        }
+
+        ctx.font = 'bold ' + fontSize + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(3, Math.floor(fontSize * 0.24));
+
+        const lineHeight = fontSize * 1.22;
+        const totalTextH = lines.length * lineHeight;
+        let startY = y1 + (bh - totalTextH) / 2 + lineHeight / 2;
+        const centerX = x1 + bw / 2;
+
+        const isDarkBg = 128 > bgLum;
+        ctx.strokeStyle = isDarkBg ? '#000000' : '#FFFFFF';
+        ctx.fillStyle = isDarkBg ? '#FFFFFF' : '#000000';
+
+        for (const line of lines) {
+          ctx.strokeText(line, centerX, startY);
+          ctx.fillText(line, centerX, startY);
+          startY += lineHeight;
+        }
+      }
+
+      targetImg.removeAttribute('srcset');
+      targetImg.removeAttribute('data-src');
+      targetImg.removeAttribute('data-lazy-src');
+      targetImg.src = canvas.toDataURL('image/jpeg', 0.92);
+      targetImg.dataset.tnkTranslated = '1';
+    })();
+    """;
+
+    await _webController?.evaluateJavascript(source: jsRender);
+  }
+
+  Widget _buildChromeTopBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1E1F22),
+        border: Border(bottom: BorderSide(color: Colors.white10)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                icon: Icon(
+                  _isHome ? Icons.home : Icons.home_outlined,
+                  color: _isHome ? const Color(0xFF8AB4F8) : Colors.white70,
+                ),
+                tooltip: 'หน้าหลัก',
+                onPressed: _goHome,
+              ),
+              Expanded(
+                child: Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF28292E),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: TextField(
+                    controller: _omniboxController,
+                    textInputAction: TextInputAction.go,
+                    style: const TextStyle(fontSize: 14, color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'ค้นหาด้วย Google หรือพิมพ์ URL',
+                      hintStyle:
+                          const TextStyle(fontSize: 14, color: Colors.white54),
+                      prefixIcon: Icon(
+                        _isHome ? Icons.search : Icons.lock_outline,
+                        size: 18,
+                        color: Colors.white54,
+                      ),
+                      suffixIcon: _omniboxController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () {
+                                _omniboxController.clear();
+                                setState(() {});
+                              },
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: _navigateToInput,
+                  ),
+                ),
+              ),
+              if (!_isHome)
+                IconButton(
+                  icon: Icon(_isLoading ? Icons.close : Icons.refresh),
+                  onPressed: () {
+                    if (_isLoading) {
+                      _webController?.stopLoading();
+                    } else {
+                      _webController?.reload();
+                    }
+                  },
+                ),
+              PopupMenuButton(
+                icon: const Icon(Icons.more_vert),
+                color: const Color(0xFF28292E),
+                onSelected: (val) async {
+                  if (val == 'bookmark') {
+                    _toggleBookmark();
+                  } else if (val == 'history') {
+                    _openBookmarksAndHistorySheet();
+                  } else if (val == 'desktop') {
+                    _toggleDesktopMode();
+                  } else if (val == 'clear_cache') {
+                    await InAppWebViewController.clearAllCache();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('ล้างแคชเว็บเรียบร้อย')),
+                      );
+                    }
+                  } else if (val == 'settings') {
+                    _openSettingsDialog();
+                  }
+                },
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: 'bookmark',
+                    child: Row(
+                      children: [
+                        Icon(
+                          _isBookmarked()
+                              ? Icons.bookmark
+                              : Icons.bookmark_border,
+                          color: _isBookmarked()
+                              ? const Color(0xFF8AB4F8)
+                              : Colors.white,
+                        ),
+                        const SizedBox(width: 12),
+                        const Text('เพิ่ม/ลบบุ๊กมาร์กหน้านี้'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'history',
+                    child: Row(
+                      children: [
+                        Icon(Icons.history),
+                        SizedBox(width: 12),
+                        Text('บุ๊กมาร์ก & ประวัติเข้าเว็บ'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'desktop',
+                    child: Row(
+                      children: [
+                        Icon(
+                          _isDesktopMode
+                              ? Icons.check_box
+                              : Icons.check_box_outline_blank,
+                          color: _isDesktopMode
+                              ? const Color(0xFF8AB4F8)
+                              : Colors.white,
+                        ),
+                        const SizedBox(width: 12),
+                        const Text('ขอหน้าเว็บแบบเดสก์ท็อป (PC)'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'clear_cache',
+                    child: Row(
+                      children: [
+                        Icon(Icons.cleaning_services_outlined),
+                        SizedBox(width: 12),
+                        Text('ล้างแคชของเบราว์เซอร์'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'settings',
+                    child: Row(
+                      children: [
+                        Icon(Icons.key, color: Color(0xFFC58AF9)),
+                        SizedBox(width: 12),
+                        Text('ตั้งค่า Gemini API Key'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          if (_isLoading && !_isHome)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: LinearProgressIndicator(
+                value: _progress,
+                minHeight: 2,
+                backgroundColor: Colors.transparent,
+                color: const Color(0xFF8AB4F8),
+              ),
             ),
-            suffixIcon: IconButton(
-              icon: const Icon(Icons.arrow_forward),
-              onPressed: () {
-                String url = _urlController.text.trim();
-                if (!url.startsWith('http')) url = 'https://$url';
-                _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
-              },
-            ),
-          ),
-          onSubmitted: (val) {
-            String url = val.trim();
-            if (!url.startsWith('http')) url = 'https://$url';
-            _webViewController?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
-          },
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _webViewController?.reload(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _openSettingsDialog,
-          ),
         ],
       ),
-      body: Stack(
-        children: [
-          InAppWebView(
-            initialUrlRequest: URLRequest(url: WebUri(_urlController.text)),
-            initialSettings: InAppWebViewSettings(
-              javaScriptEnabled: true,
-              domStorageEnabled: true,
-              useWideViewPort: true,
-              mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
-              userAgent:
-                  'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+    );
+  }
+
+  Widget _buildHomeDashboard() {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+      children: [
+        const SizedBox(height: 16),
+        Center(
+          child: Text(
+            'TNK Browser',
+            style: GoogleFonts.poppins(
+              fontSize: 34,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              letterSpacing: 0.5,
             ),
-            onWebViewCreated: (controller) => _webViewController = controller,
-            onLoadStop: (controller, url) {
-              if (url != null) {
-                setState(() => _urlController.text = url.toString());
-              }
-            },
           ),
-          if (_isWorking)
-            Container(
-              color: Colors.black87,
-              child: Center(
+        ),
+        const SizedBox(height: 6),
+        Center(
+          child: Text(
+            'เบราว์เซอร์อ่านการ์ตูน & แปลไทยด้วย AI ในหน้าเว็บ',
+            style: GoogleFonts.sarabun(fontSize: 14, color: Colors.white60),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF28292E),
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: const [
+              BoxShadow(
+                  color: Colors.black26, blurRadius: 8, offset: Offset(0, 4)),
+            ],
+          ),
+          child: TextField(
+            controller: _homeSearchController,
+            textInputAction: TextInputAction.search,
+            style: const TextStyle(fontSize: 16),
+            decoration: InputDecoration(
+              hintText: 'ค้นหาผ่าน Google หรือวางลิงก์เว็บการ์ตูน...',
+              border: InputBorder.none,
+              icon: const Icon(Icons.search, color: Color(0xFF8AB4F8)),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.arrow_forward_rounded,
+                    color: Color(0xFF8AB4F8)),
+                onPressed: () => _navigateToInput(_homeSearchController.text),
+              ),
+            ),
+            onSubmitted: _navigateToInput,
+          ),
+        ),
+        const SizedBox(height: 28),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'ทางลัดเว็บด่วน (กดค้างเพื่อลบ)',
+              style: GoogleFonts.sarabun(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Colors.white70,
+              ),
+            ),
+            TextButton.icon(
+              onPressed: _showAddShortcutDialog,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('เพิ่มเว็บ'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _shortcuts.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 0.85,
+          ),
+          itemBuilder: (ctx, i) {
+            final item = _shortcuts[i] as Map;
+            final String title = item['title'].toString();
+            final String url = item['url'].toString();
+            final String firstChar =
+                title.isNotEmpty ? title.substring(0, 1).toUpperCase() : 'W';
+
+            return InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => _navigateToInput(url),
+              onLongPress: () {
+                setState(() => _shortcuts.removeAt(i));
+                _saveData();
+              },
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: const Color(0xFF28292E),
+                    child: Text(
+                      firstChar,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF8AB4F8),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 24),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1F22),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                _apiKey.isNotEmpty ? Icons.verified_user : Icons.warning_amber,
+                color:
+                    _apiKey.isNotEmpty ? Colors.greenAccent : Colors.amberAccent,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const CircularProgressIndicator(color: Colors.amberAccent),
-                    const SizedBox(height: 20),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        _statusMessage,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.sarabun(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                    Text(
+                      _apiKey.isNotEmpty
+                          ? 'พร้อมแปลภาษาไทย ($_selectedModel)'
+                          : 'ยังไม่ได้ตั้งค่า Gemini API Key',
+                      style: GoogleFonts.sarabun(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'เปิดหน้าเว็บการ์ตูนเรื่องไหนก็ได้ แล้วกดปุ่ม "แปลหน้านี้" ด้านล่างเพื่อแปลทับในหน้าเว็บทันที',
+                      style: GoogleFonts.sarabun(
+                        fontSize: 12,
+                        color: Colors.white60,
                       ),
                     ),
                   ],
                 ),
               ),
+              TextButton(
+                onPressed: _openSettingsDialog,
+                child: const Text('ตั้งค่า'),
+              ),
+            ],
+          ),
+        ),
+        if (_history.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          Text(
+            'เข้าชมล่าสุด',
+            style: GoogleFonts.sarabun(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: Colors.white70,
             ),
+          ),
+          const SizedBox(height: 8),
+          ..._history.take(5).map((item) {
+            final Map h = item as Map;
+            return Card(
+              color: const Color(0xFF1E1F22),
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const Icon(Icons.history, color: Colors.white54),
+                title: Text(
+                  h['title'].toString(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13),
+                ),
+                subtitle: Text(
+                  h['url'].toString(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Colors.white54),
+                ),
+                onTap: () => _navigateToInput(h['url'].toString()),
+              ),
+            );
+          }),
         ],
+      ],
+    );
+  }
+
+  Widget _buildBottomChromeBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1E1F22),
+        border: Border(top: BorderSide(color: Colors.white10)),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isWorking ? null : _extractAndTranslatePage,
-        backgroundColor: Colors.deepPurpleAccent,
-        icon: const Icon(Icons.translate, color: Colors.white),
-        label: Text(
-          'คลีน & แปลไทย',
-          style: GoogleFonts.sarabun(fontWeight: FontWeight.bold, color: Colors.white),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+              onPressed: (!_isHome && _canGoBack)
+                  ? () => _webController?.goBack()
+                  : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.arrow_forward_ios, size: 20),
+              onPressed: (!_isHome && _canGoForward)
+                  ? () => _webController?.goForward()
+                  : null,
+            ),
+            ElevatedButton.icon(
+              onPressed: _isTranslating ? null : _translateCurrentPageInPlace,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF8AB4F8),
+                foregroundColor: Colors.black,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: Text(
+                'แปลหน้านี้',
+                style: GoogleFonts.sarabun(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            IconButton(
+              icon: Icon(
+                _isBookmarked() ? Icons.bookmark : Icons.bookmark_border,
+                color:
+                    _isBookmarked() ? const Color(0xFF8AB4F8) : Colors.white70,
+              ),
+              onPressed: _isHome ? null : _toggleBookmark,
+            ),
+            IconButton(
+              icon: const Icon(Icons.collections_bookmark_outlined),
+              onPressed: _openBookmarksAndHistorySheet,
+            ),
+          ],
         ),
       ),
     );
   }
-}
-
-class TranslatedReaderScreen extends StatelessWidget {
-  final List pages;
-
-  const TranslatedReaderScreen({super.key, required this.pages});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'โหมดอ่านแปลไทย (${pages.length} หน้า)',
-          style: GoogleFonts.sarabun(fontWeight: FontWeight.bold),
-        ),
-      ),
-      body: ListView.builder(
-        itemCount: pages.length,
-        itemBuilder: (context, index) {
-          final TranslatedPageData page = pages[index] as TranslatedPageData;
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              final double displayW = constraints.maxWidth;
-              final double displayH = displayW * (page.imageHeight / page.imageWidth);
-
-              return SizedBox(
-                width: displayW,
-                height: displayH,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        if (!_isHome && _webController != null) {
+          final canBack = await _webController!.canGoBack();
+          if (canBack) {
+            await _webController!.goBack();
+            return;
+          } else {
+            _goHome();
+            return;
+          }
+        }
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildChromeTopBar(),
+              Expanded(
                 child: Stack(
                   children: [
-                    Image.memory(
-                      page.cleanedImageBytes,
-                      width: displayW,
-                      height: displayH,
-                      fit: BoxFit.contain,
+                    InAppWebView(
+                      initialSettings: InAppWebViewSettings(
+                        javaScriptEnabled: true,
+                        domStorageEnabled: true,
+                        useWideViewPort: true,
+                        loadWithOverviewMode: true,
+                        builtInZoomControls: true,
+                        displayZoomControls: false,
+                        supportZoom: true,
+                        mixedContentMode:
+                            MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+                        userAgent: _mobileUA,
+                      ),
+                      onWebViewCreated: (ctrl) => _webController = ctrl,
+                      onLoadStart: (ctrl, url) {
+                        if (url != null && url.toString() != 'about:blank') {
+                          setState(() {
+                            _isLoading = true;
+                            _currentUrl = url.toString();
+                            _omniboxController.text = url.toString();
+                          });
+                        }
+                        _refreshNavigationState();
+                      },
+                      onProgressChanged: (ctrl, p) {
+                        setState(() {
+                          _progress = p / 100.0;
+                          if (p == 100) _isLoading = false;
+                        });
+                      },
+                      onLoadStop: (ctrl, url) async {
+                        setState(() => _isLoading = false);
+                        if (url != null && url.toString() != 'about:blank') {
+                          final title = await ctrl.getTitle() ?? '';
+                          setState(() {
+                            _currentUrl = url.toString();
+                            _currentTitle = title;
+                            _omniboxController.text = url.toString();
+                          });
+                          _addHistoryItem(title, url.toString());
+                        }
+                        _refreshNavigationState();
+                      },
                     ),
-                    ...page.blocks.map((b) {
-                      final TextBlock block = b as TextBlock;
-                      final double left = (block.xmin / 1000.0) * displayW;
-                      final double top = (block.ymin / 1000.0) * displayH;
-                      final double width = ((block.xmax - block.xmin) / 1000.0) * displayW;
-                      final double height = ((block.ymax - block.ymin) / 1000.0) * displayH;
-
-                      return Positioned(
-                        left: left,
-                        top: top,
-                        width: width.clamp(24.0, displayW),
-                        height: height.clamp(20.0, displayH),
-                        child: Center(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: width.clamp(40.0, displayW),
-                              ),
-                              child: Text(
-                                block.text,
-                                textAlign: TextAlign.center,
-                                style: GoogleFonts.sarabun(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 15,
-                                  height: 1.15,
-                                  shadows: const [
-                                    Shadow(color: Colors.white, blurRadius: 3),
-                                    Shadow(color: Colors.white, blurRadius: 6),
-                                  ],
+                    if (_isHome)
+                      Container(
+                        color: const Color(0xFF131314),
+                        child: _buildHomeDashboard(),
+                      ),
+                    if (_isTranslating)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 16,
+                        child: Material(
+                          elevation: 8,
+                          borderRadius: BorderRadius.circular(16),
+                          color: const Color(0xFF28292E),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: Color(0xFF8AB4F8),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Text(
+                                    _translateStatus,
+                                    style: GoogleFonts.sarabun(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() => _cancelRequested = true);
+                                  },
+                                  child: const Text(
+                                    'หยุด',
+                                    style: TextStyle(color: Colors.redAccent),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      );
-                    }),
+                      ),
                   ],
                 ),
-              );
-            },
-          );
-        },
+              ),
+              _buildBottomChromeBar(),
+            ],
+          ),
+        ),
       ),
     );
   }
