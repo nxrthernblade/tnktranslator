@@ -303,7 +303,8 @@ class _ModernBrowserScreenState extends State {
                 borderRadius: BorderRadius.circular(22),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
-                    width: 285,
+                    minWidth: 285,
+                    maxWidth: 285,
                     maxHeight: 560,
                   ),
                   child: SingleChildScrollView(
