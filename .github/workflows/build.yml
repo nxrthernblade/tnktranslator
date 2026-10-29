@@ -23,17 +23,24 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Generate Android Platform Files Safely
+      - name: Generate Android Platform Files and Inject Internet Permission
         run: |
           cp pubspec.yaml pubspec.yaml.bak
           cp lib/main.dart main.dart.bak
           flutter create --platforms=android --org com.tnk.translator .
           mv pubspec.yaml.bak pubspec.yaml
           mv main.dart.bak lib/main.dart
-          sed -i '/\x3capplication/i \x3cuses-permission android:name="android.permission.INTERNET"/\x3e' android/app/src/main/AndroidManifest.xml
-          sed -i 's/\x3capplication/\x3capplication android:usesCleartextTraffic="true"/g' android/app/src/main/AndroidManifest.xml
+          python3 -c '
+          p = "android/app/src/main/AndroidManifest.xml"
+          t = open(p).read()
+          o, c = chr(60), chr(62)
+          perms = f"{o}uses-permission android:name=\"android.permission.INTERNET\"/{c}\n    {o}uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/{c}\n    "
+          t = t.replace(f"{o}application", perms + f"{o}application android:usesCleartextTraffic=\"true\"", 1)
+          open(p, "w").write(t)
+          '
+          grep "INTERNET" android/app/src/main/AndroidManifest.xml
 
-      - name: Install Dependencies & Fix InAppWebView Proguard Bug
+      - name: Install Dependencies and Fix Proguard
         run: |
           flutter pub get
           find ~/.pub-cache -name "build.gradle*" -exec sed -i "s/proguard-android.txt/proguard-android-optimize.txt/g" {} +
