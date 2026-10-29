@@ -8,7 +8,7 @@ import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const HiaTranslatorApp());
 }
@@ -46,13 +46,13 @@ class TextBlock {
     required this.text,
   });
 
-  factory TextBlock.fromJson(Map<String, dynamic> json) {
-    final box = List<num>.from(json['box_2d'] ?? [0, 0, 100, 100]);
+  factory TextBlock.fromJson(Map json) {
+    final List box = List.from(json['box_2d'] ?? [0, 0, 100, 100]);
     return TextBlock(
-      ymin: box[0].toInt().clamp(0, 1000),
-      xmin: box[1].toInt().clamp(0, 1000),
-      ymax: box[2].toInt().clamp(0, 1000),
-      xmax: box[3].toInt().clamp(0, 1000),
+      ymin: (box[0] as num).toInt().clamp(0, 1000),
+      xmin: (box[1] as num).toInt().clamp(0, 1000),
+      ymax: (box[2] as num).toInt().clamp(0, 1000),
+      xmax: (box[3] as num).toInt().clamp(0, 1000),
       text: json['text']?.toString() ?? '',
     );
   }
@@ -62,7 +62,7 @@ class TranslatedPageData {
   final Uint8List cleanedImageBytes;
   final int imageWidth;
   final int imageHeight;
-  final List<TextBlock> blocks;
+  final List blocks;
 
   TranslatedPageData({
     required this.cleanedImageBytes,
@@ -72,17 +72,18 @@ class TranslatedPageData {
   });
 }
 
-Map<String, dynamic> cleanMangaImageIsolate(Map<String, dynamic> params) {
-  final Uint8List bytes = params['bytes'];
-  final List<dynamic> rawBlocks = params['blocks'];
+Map cleanMangaImageIsolate(Map params) {
+  final Uint8List bytes = params['bytes'] as Uint8List;
+  final List rawBlocks = params['blocks'] as List;
 
   final img.Image? decoded = img.decodeImage(bytes);
   if (decoded == null) {
     return {'bytes': bytes, 'width': 1, 'height': 1};
   }
 
-  for (var b in rawBlocks) {
-    final List<dynamic> box = b['box_2d'];
+  for (final dynamic b in rawBlocks) {
+    final Map blockMap = b as Map;
+    final List box = blockMap['box_2d'] as List;
     final int x1 = ((box[1] as num) * decoded.width ~/ 1000).clamp(0, decoded.width - 1);
     final int y1 = ((box[0] as num) * decoded.height ~/ 1000).clamp(0, decoded.height - 1);
     final int x2 = ((box[3] as num) * decoded.width ~/ 1000).clamp(0, decoded.width - 1);
@@ -106,16 +107,16 @@ Map<String, dynamic> cleanMangaImageIsolate(Map<String, dynamic> params) {
       count += 2;
     }
 
-    final int bgR = count > 0 ? (rSum ~/ count) : 255;
-    final int bgG = count > 0 ? (gSum ~/ count) : 255;
-    final int bgB = count > 0 ? (bSum ~/ count) : 255;
+    final int bgR = count != 0 ? (rSum ~/ count) : 255;
+    final int bgG = count != 0 ? (gSum ~/ count) : 255;
+    final int bgB = count != 0 ? (bSum ~/ count) : 255;
     final double bgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
 
     for (int y = y1; y <= y2; y++) {
       for (int x = x1; x <= x2; x++) {
         final p = decoded.getPixel(x, y);
         final double lum = 0.299 * p.r + 0.587 * p.g + 0.114 * p.b;
-        if ((lum - bgLum).abs() > 28) {
+        if ((lum - bgLum).abs() >= 28) {
           decoded.setPixelRgb(x, y, bgR, bgG, bgB);
         }
       }
@@ -133,10 +134,10 @@ class MangaBrowserScreen extends StatefulWidget {
   const MangaBrowserScreen({super.key});
 
   @override
-  State<MangaBrowserScreen> createState() => _MangaBrowserScreenState();
+  State createState() => _MangaBrowserScreenState();
 }
 
-class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
+class _MangaBrowserScreenState extends State {
   InAppWebViewController? _webViewController;
   final TextEditingController _urlController =
       TextEditingController(text: 'https://manganato.com');
@@ -151,7 +152,7 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
     _loadSettings();
   }
 
-  Future<void> _loadSettings() async {
+  Future _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _apiKey = prefs.getString('gemini_api_key') ?? '';
@@ -159,7 +160,7 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
     });
   }
 
-  Future<void> _saveSettings(String key, String model) async {
+  Future _saveSettings(String key, String model) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('gemini_api_key', key.trim());
     await prefs.setString('gemini_model', model.trim());
@@ -226,16 +227,16 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
     );
   }
 
-  Future<void> _extractAndTranslatePage() async {
+  Future _extractAndTranslatePage() async {
     if (_apiKey.isEmpty) {
       _openSettingsDialog();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('ใส่ Gemini API Key ก่อนนะเฮีย!')),
       );
-      return;
+      return null;
     }
 
-    if (_webViewController == null) return;
+    if (_webViewController == null) return null;
 
     setState(() {
       _isWorking = true;
@@ -246,15 +247,14 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
       const String jsExtractor = """
       (async function() {
         const imgs = Array.from(document.querySelectorAll('img'));
-        const mangaImgs = imgs.filter(img => {
+        const mangaImgs = imgs.filter(function(img) {
           const w = img.naturalWidth || img.width || img.clientWidth;
           const h = img.naturalHeight || img.height || img.clientHeight;
           return w >= 280 && h >= 350;
         });
 
         const results = [];
-        for (let i = 0; i < mangaImgs.length; i++) {
-          const img = mangaImgs[i];
+        for (const img of mangaImgs) {
           const src = img.currentSrc || img.src || img.dataset.src || img.getAttribute('data-lazy-src');
           if (!src) continue;
 
@@ -270,9 +270,11 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
             try {
               const resp = await fetch(src, { credentials: 'include' });
               const blob = await resp.blob();
-              const b64 = await new Promise((resolve) => {
+              const b64 = await new Promise(function(resolve) {
                 const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.onloadend = function() {
+                  resolve(reader.result.split(',')[1]);
+                };
                 reader.readAsDataURL(blob);
               });
               if (b64) results.push(b64);
@@ -288,18 +290,17 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
       final rawResult = await _webViewController!.evaluateJavascript(source: jsExtractor);
       if (rawResult == null) throw Exception('ไม่สามารถดึงข้อมูลจากหน้าเว็บได้');
 
-      final List<dynamic> extractedList = jsonDecode(rawResult.toString());
+      final List extractedList = jsonDecode(rawResult.toString()) as List;
       if (extractedList.isEmpty) {
         throw Exception('ไม่พบรูปหน้าการ์ตูนในหน้านี้ ลองเลื่อนหน้าจอให้รูปโหลดก่อนนะเฮีย');
       }
 
       final currentUrl = (await _webViewController!.getUrl())?.toString() ?? '';
-      final List<Uint8List> imageBytesList = [];
+      final List imageBytesList = [];
+      final List limitedList = extractedList.take(8).toList();
 
-      final int maxPages = extractedList.length > 8 ? 8 : extractedList.length;
-
-      for (int i = 0; i < maxPages; i++) {
-        final String item = extractedList[i].toString();
+      for (final dynamic rawItem in limitedList) {
+        final String item = rawItem.toString();
         if (item.startsWith('URL:')) {
           final imgUrl = item.substring(4);
           final resp = await http.get(
@@ -318,32 +319,34 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
         }
       }
 
-      final List<TranslatedPageData> finalPages = [];
+      final List finalPages = [];
+      int pageIndex = 0;
 
-      for (int i = 0; i < imageBytesList.length; i++) {
+      for (final dynamic pageBytesObj in imageBytesList) {
+        pageIndex++;
         setState(() {
-          _statusMessage = 'กำลังคลีนและแปลหน้าที่ ${i + 1} / ${imageBytesList.length}...';
+          _statusMessage = 'กำลังคลีนและแปลหน้าที่ $pageIndex / ${imageBytesList.length}...';
         });
 
-        final Uint8List pageBytes = imageBytesList[i];
-        final List> rawBlocks = await _callGeminiTranslate(pageBytes);
+        final Uint8List pageBytes = pageBytesObj as Uint8List;
+        final List rawBlocks = (await _callGeminiTranslate(pageBytes)) as List;
 
-        final cleanedResult = await compute(cleanMangaImageIsolate, {
+        final Map cleanedResult = await compute(cleanMangaImageIsolate, {
           'bytes': pageBytes,
           'blocks': rawBlocks,
         });
 
         finalPages.add(
           TranslatedPageData(
-            cleanedImageBytes: cleanedResult['bytes'],
-            imageWidth: cleanedResult['width'],
-            imageHeight: cleanedResult['height'],
-            blocks: rawBlocks.map((e) => TextBlock.fromJson(e)).toList(),
+            cleanedImageBytes: cleanedResult['bytes'] as Uint8List,
+            imageWidth: cleanedResult['width'] as int,
+            imageHeight: cleanedResult['height'] as int,
+            blocks: rawBlocks.map((e) => TextBlock.fromJson(Map.from(e as Map))).toList(),
           ),
         );
       }
 
-      if (!mounted) return;
+      if (!mounted) return null;
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -364,9 +367,10 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
         });
       }
     }
+    return null;
   }
 
-  Future<List>> _callGeminiTranslate(Uint8List imageBytes) async {
+  Future _callGeminiTranslate(Uint8List imageBytes) async {
     final String b64Image = base64Encode(imageBytes);
     final Uri endpoint = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$_selectedModel:generateContent?key=$_apiKey',
@@ -419,8 +423,8 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
     String rawJson = candidates[0]['content']['parts'][0]['text'].toString().trim();
     rawJson = rawJson.replaceAll('```json', '').replaceAll('```', '').trim();
 
-    final List<dynamic> parsed = jsonDecode(rawJson);
-    return parsed.map((e) => Map<String, dynamic>.from(e)).toList();
+    final List parsed = jsonDecode(rawJson) as List;
+    return parsed.map((e) => Map.from(e as Map)).toList();
   }
 
   @override
@@ -526,7 +530,7 @@ class _MangaBrowserScreenState extends State<MangaBrowserScreen> {
 }
 
 class TranslatedReaderScreen extends StatelessWidget {
-  final List<TranslatedPageData> pages;
+  final List pages;
 
   const TranslatedReaderScreen({super.key, required this.pages});
 
@@ -542,7 +546,7 @@ class TranslatedReaderScreen extends StatelessWidget {
       body: ListView.builder(
         itemCount: pages.length,
         itemBuilder: (context, index) {
-          final page = pages[index];
+          final TranslatedPageData page = pages[index] as TranslatedPageData;
           return LayoutBuilder(
             builder: (context, constraints) {
               final double displayW = constraints.maxWidth;
@@ -559,7 +563,8 @@ class TranslatedReaderScreen extends StatelessWidget {
                       height: displayH,
                       fit: BoxFit.contain,
                     ),
-                    ...page.blocks.map((block) {
+                    ...page.blocks.map((b) {
+                      final TextBlock block = b as TextBlock;
                       final double left = (block.xmin / 1000.0) * displayW;
                       final double top = (block.ymin / 1000.0) * displayH;
                       final double width = ((block.xmax - block.xmin) / 1000.0) * displayW;
